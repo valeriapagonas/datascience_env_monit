@@ -12,4 +12,4 @@
 ## Backup
 - Code: GitHub is the second copy
 - Results I must keep: copied to my laptop on 06.11.2026
-- Raw data: original download source + <university storage>
+- Raw data: original download source 
