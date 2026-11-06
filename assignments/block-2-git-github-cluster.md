@@ -6,12 +6,12 @@ This assignment takes about 2 hours. You practise the Git loop from class, then 
 
 You hand in three things on ILIAS before Block 3: the link to your fork on GitHub, the contents of your job's `.out` file, and your `docs/STORAGE.md`.
 
-| Part | What you do | Time |
-| --- | --- | --- |
-| A | README, `.gitignore`, pull, history | 40 min |
-| B | Connect, workspace, run a job | 50 min |
-| C | Storage note and fresh-clone test | 20 min |
-| Hand-in | Check the list and submit on ILIAS | 10 min |
+| Part    | What you do                         | Time   |
+|---------|-------------------------------------|--------|
+| A       | README, `.gitignore`, pull, history | 40 min |
+| B       | Connect, workspace, run a job       | 50 min |
+| C       | Storage note and fresh-clone test   | 20 min |
+| Hand-in | Check the list and submit on ILIAS  | 10 min |
 
 **Before you start, you need:**
 
@@ -27,11 +27,11 @@ Work in your cloned folder, in a terminal (Git Bash on Windows). Look at `git st
 
 ### A1. Write a README
 
-1. Open `README.md` in the project folder. It is the course README. In your fork, replace its content with your own project README. Your fork is your own copy, so the course repository is not affected.
-2. Answer four questions in it: what is this, how do I run it, what is in the folder, who made it.
-3. Stage, commit and push.
+1.  Open `README.md` in the project folder. It is the course README. In your fork, replace its content with your own project README. Your fork is your own copy, so the course repository is not affected.
+2.  Answer four questions in it: what is this, how do I run it, what is in the folder, who made it.
+3.  Stage, commit and push.
 
-```markdown
+``` markdown
 # Cluster hello
 
 Bootstraps a synthetic GPP series and prints a 95% interval.
@@ -48,7 +48,7 @@ docs/     notes and templates
 Your Name
 ```
 
-```bash
+``` bash
 git status
 git add README.md
 git commit -m "Add README with run instructions"
@@ -59,9 +59,9 @@ git push
 
 ### A2. Add a .gitignore
 
-1. Create a file named exactly `.gitignore` with these lines:
+1.  Create a file named exactly `.gitignore` with these lines:
 
-```
+```         
 .DS_Store
 *.tmp
 *.out
@@ -69,10 +69,10 @@ git push
 .env
 ```
 
-2. Create a test file and check that Git ignores it.
-3. Commit and push `.gitignore`.
+2.  Create a test file and check that Git ignores it.
+3.  Commit and push `.gitignore`.
 
-```bash
+``` bash
 touch test.tmp
 git status
 git add .gitignore
@@ -84,12 +84,12 @@ git push
 
 ### A3. Pull changes from GitHub
 
-1. On github.com open `README.md` in your fork and click the pencil icon.
-2. Add a line and click **Commit changes**.
-3. In the terminal run `git status`. It still says your branch is up to date, because Git only knows what it heard last time.
-4. Run `git pull`, then open `README.md` on your laptop.
+1.  On github.com open `README.md` in your fork and click the pencil icon.
+2.  Add a line and click **Commit changes**.
+3.  In the terminal run `git status`. It still says your branch is up to date, because Git only knows what it heard last time.
+4.  Run `git pull`, then open `README.md` on your laptop.
 
-```bash
+``` bash
 git status
 git pull
 cat README.md
@@ -115,7 +115,7 @@ Answer: the third. It says what changed and why, so you can find the commit with
 
 Before you commit, look at what you are about to commit. Add a line with your name and today's date to `README.md`, save it, then run these commands in order:
 
-```bash
+``` bash
 git diff
 git add README.md
 git diff
@@ -125,7 +125,7 @@ git commit -m "Add author and date to README"
 
 Now look back through the history:
 
-```bash
+``` bash
 git log --oneline --graph
 git log README.md
 git show HEAD
@@ -142,7 +142,7 @@ Code goes to your home directory (`$HOME`, permanent and backed up). Results go 
 
 Follow the [SSH connection guide](https://negin-katal.github.io/datascience_env_monit/ssh-connection/) if you have not connected before.
 
-```bash
+``` bash
 ssh bwunicluster
 hostname
 pwd
@@ -154,7 +154,7 @@ ws_list
 
 ### B2. Clone your fork on the cluster
 
-```bash
+``` bash
 cd $HOME
 git clone https://github.com/YOUR-USER/datascience_env_monit.git
 cd datascience_env_monit
@@ -165,7 +165,7 @@ Replace `YOUR-USER` with your GitHub name. **Check:** the log shows your commits
 
 ### B3. Create a workspace
 
-```bash
+``` bash
 ws_allocate envmon 60
 cd $(ws_find envmon)
 pwd
@@ -180,7 +180,7 @@ The job script is a normal shell script. Lines starting with `#SBATCH` are reque
 
 **R route:** `jobs/hello_R.sh`
 
-```bash
+``` bash
 #!/bin/bash
 #SBATCH --job-name=hello_R
 #SBATCH --partition=dev_cpu
@@ -195,19 +195,19 @@ Rscript scripts/cluster_hello.R
 
 **Python route:** `jobs/hello_py.sh` has the same header with `hello_py`. If `python3` is missing or too old on the compute node, run `module spider python` on the login node and add the matching `module load` line before the `cd`.
 
-| Line | Meaning |
-| --- | --- |
-| `--job-name=hello_R` | Name shown in the queue |
-| `--partition=dev_cpu` | Short test queue, 30 minutes maximum |
-| `--ntasks=1` | One process |
-| `--time=00:05:00` | Stop after 5 minutes at most |
+| Line                      | Meaning                                  |
+|---------------------------|------------------------------------------|
+| `--job-name=hello_R`      | Name shown in the queue                  |
+| `--partition=dev_cpu`     | Short test queue, 30 minutes maximum     |
+| `--ntasks=1`              | One process                              |
+| `--time=00:05:00`         | Stop after 5 minutes at most             |
 | `--output=hello_R_%j.out` | Output file. `%j` becomes the job number |
 
 ### B5. Submit and watch
 
 Submit from inside the workspace so the output file lands there.
 
-```bash
+``` bash
 cd $(ws_find envmon)
 sbatch $HOME/datascience_env_monit/jobs/hello_R.sh
 squeue -u $USER
@@ -221,7 +221,7 @@ cat hello_R_*.out
 
 Your `.out` file should look like this. Host name and job number will differ.
 
-```
+```         
 Host: uc2n123.localdomain
 Job ID: 1234567
 Resamples: 5000
@@ -234,7 +234,7 @@ Python gives about `4.01 (95% CI 3.84 to 4.17)`. The R and Python numbers differ
 
 Run the script on your laptop with a small number of resamples. `Job ID` shows `none`, which is correct here.
 
-```bash
+``` bash
 Rscript scripts/cluster_hello.R 200
 python3 scripts/cluster_hello.py 200
 ```
@@ -246,7 +246,7 @@ Use the line for your route. Once your login works, repeat B1 to B6 and hand in 
 The cluster is a place to compute, not a place to keep things. Know where each file lives and when it disappears.
 
 | Place | Lifetime | Backup | Use it for |
-| --- | --- | --- | --- |
+|------------------|------------------|------------------|------------------|
 | `$HOME` | Permanent (500 GiB soft quota) | Regular backup | Code, small files |
 | Workspace | 60 days, can be extended | None | Results, big data |
 | `$TMPDIR` | Deleted when the job ends | None | Scratch during a job |
@@ -254,19 +254,19 @@ The cluster is a place to compute, not a place to keep things. Know where each f
 
 Extend a workspace before it expires with `ws_extend envmon 60`. This works up to three times. Copy results you must keep to your laptop, running this on the laptop:
 
-```bash
+``` bash
 scp "bwunicluster:<workspace path>/hello_R_*.out" .
 ```
 
 ### C1. Document your storage
 
-1. On the cluster run `ws_list` and note the path and the expiry date.
-2. On your laptop copy `docs/STORAGE_TEMPLATE.md` to `docs/STORAGE.md` and fill it in.
-3. Commit with the message `Document storage and backup` and push.
-4. On the cluster run `cd $HOME/datascience_env_monit`, then `git pull`.
-5. Check that `docs/STORAGE.md` is there.
+1.  On the cluster run `ws_list` and note the path and the expiry date.
+2.  On your laptop copy `docs/STORAGE_TEMPLATE.md` to `docs/STORAGE.md` and fill it in.
+3.  Commit with the message `Document storage and backup` and push.
+4.  On the cluster run `cd $HOME/datascience_env_monit`, then `git pull`.
+5.  Check that `docs/STORAGE.md` is there.
 
-```markdown
+``` markdown
 # Storage and backup
 
 ## Where things live
@@ -287,7 +287,7 @@ scp "bwunicluster:<workspace path>/hello_R_*.out" .
 
 If someone else cannot run your project from a fresh clone, it is not reproducible yet. Test it as a stranger would, on your laptop, then delete the copy.
 
-```bash
+``` bash
 cd /tmp
 git clone https://github.com/YOUR-USER/datascience_env_monit.git test-clone
 cd test-clone
@@ -304,7 +304,7 @@ For those who finish early. Not part of the hand-in.
 
 A branch is a parallel line of commits. Experiment on a branch while `main` stays untouched.
 
-```bash
+``` bash
 git switch -c faster-test     # new branch, switch to it
 # edit scripts/cluster_hello.R, change n_boot to 1000L, then:
 git commit -am "Use 1000 resamples for quick tests"
@@ -316,7 +316,7 @@ git merge faster-test         # bring the experiment in
 
 If `main` and the branch both changed the same line, Git stops and marks both versions in the file:
 
-```
+```         
 <<<<<<< HEAD
 n_boot <- 5000L
 =======
@@ -326,17 +326,17 @@ n_boot <- 1000L
 
 Above `=======` is your current branch, below is the branch you merge in. A conflict is not an error, it is a question. Resolve it in four steps:
 
-1. Open the file (`git status` lists it as both modified).
-2. Decide which version to keep, or combine them, and delete the three marker lines.
-3. Run `git add` on the file to tell Git it is solved.
-4. Run `git commit -m "Merge faster-test, keep 5000 resamples"`, then `git push`.
+1.  Open the file (`git status` lists it as both modified).
+2.  Decide which version to keep, or combine them, and delete the three marker lines.
+3.  Run `git add` on the file to tell Git it is solved.
+4.  Run `git commit -m "Merge faster-test, keep 5000 resamples"`, then `git push`.
 
 Lost? `git merge --abort` returns to the state before the merge.
 
 ### Undoing things
 
 | Situation | What to run |
-| --- | --- |
+|----|----|
 | Edited a file, want the last saved version back | `git restore FILE` |
 | Staged a file by mistake | `git restore --staged FILE` |
 | Typo in the last commit message, not pushed | `git commit --amend` |
@@ -348,7 +348,7 @@ Lost? `git merge --abort` returns to the state before the merge.
 **More ways to undo** (from the Git cheat sheet):
 
 | Situation | What to run |
-| --- | --- |
+|------------------------------------|------------------------------------|
 | Put unfinished work aside, then bring it back | `git stash`, later `git stash pop` |
 | Undo the last commit but keep the edits (not pushed yet) | `git reset HEAD^` |
 | Get one file back as it was in an older commit | `git restore --source COMMIT FILE` |
@@ -360,9 +360,9 @@ Lost? `git merge --abort` returns to the state before the merge.
 
 Submit these three things on ILIAS before Block 3:
 
-1. The link to your fork on GitHub (`https://github.com/YOUR-USER/datascience_env_monit`).
-2. The contents of your job's `.out` file, pasted as text. If you could not connect yet, paste the laptop output and say so.
-3. A copy of your `docs/STORAGE.md`.
+1.  The link to your fork on GitHub (`https://github.com/YOUR-USER/datascience_env_monit`).
+2.  The contents of your job's `.out` file, pasted as text. If you could not connect yet, paste the laptop output and say so.
+3.  A copy of your `docs/STORAGE.md`.
 
 Tick everything before you submit:
 
@@ -387,7 +387,7 @@ Three rules to keep:
 The commands from this assignment in one place, plus a few from the course cheat sheet.
 
 | Command | What it does |
-| --- | --- |
+|------------------------------------|------------------------------------|
 | `git status` | Which files changed, which are staged |
 | `git diff` | Exact lines changed, not yet staged |
 | `git diff --staged` | What the next commit will contain |
@@ -411,7 +411,7 @@ The commands from this assignment in one place, plus a few from the course cheat
 Read the last lines of an error message first. Git usually tells you the fix.
 
 | You see | Usually it means |
-| --- | --- |
+|------------------------------------|------------------------------------|
 | `not a git repository` | You are in the wrong folder. `cd` into the project. |
 | `Unable to read current working directory: Operation not permitted` | Your terminal started in a folder it may not read (macOS). Run `cd ~`, then repeat the command. If it keeps happening, give your terminal access under System Settings, Privacy & Security, Files and Folders. |
 | `Invalid username or token` | Passwords no longer work. Use browser sign-in or a token with scope `repo`. |
