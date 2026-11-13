@@ -1,4 +1,3 @@
-my_student <- "21"
 # get_my_towers.R — download your five FLUXNET towers with the FLUXNET Shuttle
 # Environmental Monitoring and Data Analysis · Block 4 · University of Freiburg
 #
