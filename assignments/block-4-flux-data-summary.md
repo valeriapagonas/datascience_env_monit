@@ -6,13 +6,13 @@ This assignment takes about 2 hours in class plus some time at home. You downloa
 
 You hand in two things on ILIAS **before Block 5 (Friday 20 November, 8:30)**: the rendered HTML report and the link to your fork on GitHub that contains the report's source (`.qmd`, `.Rmd` or `.ipynb`).
 
-| Part | What you do | Time |
-| --- | --- | --- |
-| 0 | Sync your fork with the course repository | 10 min |
-| A | Find your towers, download them with the Shuttle | 30 min |
-| B | Unzip and read one half-hourly file cleanly | 30 min |
-| C | Write the data summary report | 90 min |
-| Hand-in | Check the list and submit on ILIAS | 10 min |
+| Part    | What you do                                      | Time   |
+|---------|--------------------------------------------------|--------|
+| 0       | Sync your fork with the course repository        | 10 min |
+| A       | Find your towers, download them with the Shuttle | 30 min |
+| B       | Unzip and read one half-hourly file cleanly      | 30 min |
+| C       | Write the data summary report                    | 90 min |
+| Hand-in | Check the list and submit on ILIAS               | 10 min |
 
 **Before you start, you need:**
 
@@ -30,7 +30,7 @@ Your fork is a copy of the course repository from the day you forked it in Block
 
 In your project folder, add the course repository as a second remote called `upstream`:
 
-```bash
+``` bash
 git remote add upstream https://github.com/negin-katal/datascience_env_monit.git
 git remote -v
 ```
@@ -41,7 +41,7 @@ git remote -v
 
 Commit or stash your own changes first, so `git status` says the working tree is clean. Then:
 
-```bash
+``` bash
 git status
 git pull upstream main
 git push
@@ -55,7 +55,7 @@ git push
 
 You changed some files that the course repository also has (in Block 2 you replaced `README.md` with your own). If Git stops with `CONFLICT (content): Merge conflict in README.md`, keep your own version of that file:
 
-```bash
+``` bash
 git checkout --ours README.md
 git add README.md
 git commit -m "Merge course updates, keep my README"
@@ -80,7 +80,7 @@ Data never go into Git. Create the data folders and add `data/` to your `.gitign
 
 **R route** (R console in Positron; works on Windows, macOS and Linux):
 
-```r
+``` r
 dir.create("data/raw", recursive = TRUE)
 dir.create("data/snapshots", recursive = TRUE)
 dir.create("data/processed", recursive = TRUE)
@@ -89,7 +89,7 @@ cat("data/\n", file = ".gitignore", append = TRUE)
 
 **Python route** (terminal on macOS or Linux):
 
-```bash
+``` bash
 mkdir -p data/raw data/snapshots data/processed
 echo "data/" >> .gitignore
 ```
@@ -98,7 +98,7 @@ On Windows, use the R lines above in an R console, or create the three folders i
 
 Then, for everyone, in the terminal:
 
-```bash
+``` bash
 git add .gitignore
 git commit -m "Keep downloaded flux data out of Git"
 ```
@@ -109,7 +109,7 @@ git commit -m "Keep downloaded flux data out of Git"
 
 Download `get_my_towers.py` and `tower_sets_block4.csv` from ILIAS into your project folder and run, with your own student number:
 
-```bash
+``` bash
 python3 get_my_towers.py --student 07      # Windows: py get_my_towers.py --student 07
 ```
 
@@ -117,7 +117,7 @@ python3 get_my_towers.py --student 07      # Windows: py get_my_towers.py --stud
 
 The script installs the Shuttle if needed, makes the snapshot, downloads your five zips into `data/raw`, checks them and writes `data/raw/CITATIONS.txt`. Under the hood it runs these commands, which you can also type yourself:
 
-```bash
+``` bash
 pip install git+https://github.com/fluxnet/shuttle.git
 fluxnet-shuttle listall -o data/snapshots
 fluxnet-shuttle download -f data/snapshots/fluxnet_shuttle_snapshot_*.csv \
@@ -137,7 +137,7 @@ On Windows PowerShell, write the download command on one line (PowerShell does n
 Each zip holds several CSV files. Unzip one and list them.
 
 | File (pattern) | What is in it |
-| --- | --- |
+|------------------------------------|------------------------------------|
 | `…_FLUXMET_HH_….csv` | Fluxes and meteorology every 30 minutes. **This assignment uses these.** |
 | `…_FLUXMET_DD/WW/MM/YY_….csv` | The same variables as daily, weekly, monthly, yearly values |
 | `…_ERA5_HH … YY_….csv` | ERA5 reanalysis weather downscaled to the site |
@@ -152,7 +152,7 @@ Three things must be right: **−9999 is missing**, **time stamps are read as te
 
 **R route**
 
-```r
+``` r
 library(readr)
 library(dplyr)
 
@@ -177,7 +177,7 @@ mean(hh$NEE_VUT_REF_QC == 0, na.rm = TRUE)   # share of measured NEE
 
 **Python route**
 
-```python
+``` python
 import zipfile
 from pathlib import Path
 import pandas as pd
@@ -216,7 +216,7 @@ Turn B2 into a function `read_hh(zip_file)` that returns one tidy table with a `
 
 Create `reports/block4_data_summary.qmd` (or `.ipynb`) in your fork. It must render to HTML from a fresh clone with the commands in your README, provided the data are in `data/raw`.
 
-```yaml
+``` yaml
 ---
 title: "Data summary of my five flux towers"
 author: "Your Name"
@@ -260,8 +260,8 @@ The mean daily course (hour of day on the x-axis) of NEE and LE for each season,
 
 ### C6. Your reading
 
-1. **Energy balance** for one tower: scatter of `H_F_MDS + LE_F_MDS` against `NETRAD − G_F_MDS`, using only half hours where H and LE were measured (`_QC == 0`). Add the 1:1 line and the slope of a linear fit. Some towers have no `NETRAD` or `G`; pick one that has them.
-2. **5–8 sentences** comparing your towers: which takes up the most carbon per year, which has the largest seasonal cycle, which surprised you, and how much of the data is gap-filled.
+1.  **Energy balance** for one tower: scatter of `H_F_MDS + LE_F_MDS` against `NETRAD − G_F_MDS`, using only half hours where H and LE were measured (`_QC == 0`). Add the 1:1 line and the slope of a linear fit. Some towers have no `NETRAD` or `G`; pick one that has them.
+2.  **5–8 sentences** comparing your towers: which takes up the most carbon per year, which has the largest seasonal cycle, which surprised you, and how much of the data is gap-filled.
 
 Close the report with a **Data and citation** section: each site's citation from the snapshot, Pastorello et al. (2020), *Scientific Data* 7, 225, <https://doi.org/10.1038/s41597-020-0534-3>, and the FLUXNET acknowledgement from `flux4student/README.md`.
 
@@ -269,8 +269,8 @@ Close the report with a **Data and citation** section: each site's citation from
 
 Submit these two things on ILIAS before Block 5:
 
-1. The rendered HTML report.
-2. The link to your fork on GitHub (`https://github.com/YOUR-USER/datascience_env_monit`) with the report's source.
+1.  The rendered HTML report.
+2.  The link to your fork on GitHub (`https://github.com/YOUR-USER/datascience_env_monit`) with the report's source.
 
 Tick everything before you submit:
 
@@ -287,7 +287,7 @@ Tick everything before you submit:
 ## Troubleshooting
 
 | You see | Usually it means |
-| --- | --- |
+|------------------------------------|------------------------------------|
 | `error: remote upstream already exists` | You already added it. Skip 0.1 and go on with 0.2. |
 | `Your local changes would be overwritten by merge` | Commit (or `git stash`) your own changes first, then pull again. |
 | `fatal: refusing to merge unrelated histories` | Your clone is not from a fork of the course repository. Ask Negin. |
