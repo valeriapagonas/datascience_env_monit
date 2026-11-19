@@ -12,6 +12,8 @@ execute:
   warning: false
 ---
 
+*GitHub fork:* [valeriapagonas/datascience_env_monit](https://github.com/valeriapagonas/datascience_env_monit)
+
 # C1. Site overview
 
 ```{=html}
@@ -47,7 +49,7 @@ execute:
 | US-Elm | Everglades (long hydroperiod marsh) | US | WET | 25.5519 | -80.7826 | 2008 | 2024 | AmeriFlux | Gregory Starr, Steve Oberbauer (2026), AmeriFlux FLUXNET-1F US-Elm Everglades (long hydroperiod marsh), Ver. v1.3_r1, AmeriFlux AMP, (Dataset). <https://doi.org/10.17190/AMF/2007169> |
 :::
 
-![Sites of the 5 towers.](images/Screenshot 2026-11-19 at 18.32.43.png){fig-align="center"}
+![Sites of the 5 towers.](images/Screenshot%202026-11-19%20at%2018.32.43.png){fig-align="center"}
 
 ## C2. Data coverage
 
