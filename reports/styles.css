@@ -1,0 +1,58 @@
+/* Main text formatting */
+
+main p {
+  text-align: justify;
+  text-indent: 1.5em;
+  line-height: 1.5;
+  margin-bottom: 0.8em;
+}
+
+/* Table formatting */
+
+table {
+  font-size: 0.9em;
+}
+
+table td:first-child,
+table th:first-child {
+  white-space: nowrap;
+}
+
+table th {
+  vertical-align: bottom;
+}
+
+/* Exclude captions and table contents */
+
+main figcaption,
+main figcaption p,
+main caption,
+main .caption,
+main .caption p,
+main td p,
+main th p {
+  text-align: left;
+  text-indent: 0;
+}
+
+/* Title and subtitle */
+
+main .subtitle,
+main .quarto-title-meta p {
+  text-align: left;
+  text-indent: 0;
+}
+
+/* References */
+
+main #refs,
+main #refs p,
+main .csl-entry {
+  text-align: left;
+  text-indent: 0;
+  line-height: 1.5;
+}
+
+.csl-entry {
+  margin-bottom: 0.6em;
+}

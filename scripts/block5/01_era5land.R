@@ -15,7 +15,7 @@
 #      scroll to "Terms of use" and click Accept.
 #   3. Copy your Personal Access Token from your CDS profile page and run in R:
 #        install.packages("ecmwfr")
-#        ecmwfr::wf_set_key(key = "PASTE-YOUR-TOKEN-HERE")
+#        ecmwfr::wf_set_key(key = "---")
 #
 # Output: data/external/era5land/<SITE>_era5land_hourly.csv and <SITE>_era5land_daily.csv
 # Cite:   Muñoz-Sabater, J. et al. (2021) ERA5-Land. ESSD 13, 4349–4383.
@@ -26,11 +26,13 @@ source(file.path("scripts", "block5", "block5_sites.R"))
 library(ecmwfr)
 
 # ---- Settings -----------------------------------------------------------------
-variables <- c("2m_temperature",
-               "volumetric_soil_water_layer_1",   #   0–7 cm   (m³ m⁻³)
-               "volumetric_soil_water_layer_2",   #   7–28 cm
-               "volumetric_soil_water_layer_3",   #  28–100 cm
-               "soil_temperature_level_1")        #   0–7 cm   (K)
+variables <- c(
+  "2m_temperature",
+  "volumetric_soil_water_level_1",  # 0–7 cm
+  "volumetric_soil_water_level_2",  # 7–28 cm
+  "volumetric_soil_water_level_3",  # 28–100 cm
+  "soil_temperature_level_1"       # 0–7 cm
+)
 # More: "total_precipitation", "surface_solar_radiation_downwards", "snow_depth", ...
 # Careful: precipitation and radiation are ACCUMULATED variables in ERA5-Land.
 # Look at a few hours first before you sum them to days.

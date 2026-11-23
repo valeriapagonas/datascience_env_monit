@@ -3,7 +3,7 @@
 #
 # Every Block 5 script starts with source("scripts/block5/block5_sites.R").
 # Set your student number ONCE here (or pass it on the command line:
-#   Rscript scripts/block5/04_soilgrids.R 07).
+#   Rscript scripts/block5/04_soilgrids.R 21).
 # Run all scripts from your project folder (the one with data/ and scripts/).
 
 # ---- Your settings ------------------------------------------------------------

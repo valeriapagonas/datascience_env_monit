@@ -1,0 +1,2805 @@
+---
+title: "Environmental drivers of ecosystem productivity and carbon fluxes across five FLUXNET sites"
+subtitle: "Environmental Monitoring and Data Analysis – Block 5"
+author: "Valeria Pagonas"
+date: today
+bibliography: references.bib
+link-citations: true
+format:
+  html:
+    toc: true
+    toc-location: right
+    number-sections: true
+    code-fold: true
+    code-summary: "Show the code"
+    embed-resources: true
+    css: styles.css
+execute:
+  echo: true
+  warning: false
+  message: false
+---
+
+# Introduction
+Terrestrial ecosystems play an important role in regulating exchanges of carbon, water and energy between the land surface and the atmosphere. Ecosystem productivity and carbon fluxes are influenced by environmental conditions, including temperature, water availability, soil properties, vegetation characteristics and extreme climatic events.
+
+Eddy covariance measurements provide valuable information on ecosystem–atmosphere exchanges. Standardized FLUXNET data products facilitate comparisons of carbon, water and energy fluxes across ecosystems [@pastorello2020]. However, integrating these measurements with complementary environmental datasets can improve our understanding of the factors associated with spatial and temporal variability in ecosystem functioning.
+
+This report investigates the relationships between environmental conditions and ecosystem productivity across five FLUXNET sites representing contrasting ecosystem types: deciduous broadleaf forest, evergreen needleleaf forest, grassland, cropland and wetland. FLUXNET observations are integrated with complementary environmental datasets to explore site-specific responses to environmental variability and identify potential differences in the factors associated with ecosystem productivity and carbon fluxes.
+
+```{r}
+#| label: setup
+#| include: false
+
+library(readr)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(stringr)
+library(purrr)
+library(lubridate)
+library(knitr)
+library(patchwork)
+```
+
+```{r}
+# ecosystem color palette
+eco_cols <- c(
+  "DBF" = "#2E7D32",  # dark green
+  "ENF" = "#2A9D8F",  # teal green
+  "GRA" = "#90BE6D",  # light green
+  "CRO" = "#E9C46A",  # mustard yellow
+  "WET" = "#8ECAE6"   # light blue
+)
+
+# site metadata
+sites_tbl <- tibble(
+  site_id = c("JP-Api", "CA-Ca1", "CH-Rtb", "CZ-KrP", "US-Elm"),
+  igbp = c("DBF", "ENF", "GRA", "CRO", "WET"),
+  site_name = c(
+    "Appi forest meteorology research site",
+    "British Columbia - 1949 Douglas-fir stand",
+    "Rietholzbach",
+    "Kresin u Pacova",
+    "Everglades (long hydroperiod marsh)"
+  ),
+  country = c("Japan", "Canada", "Switzerland", "Czechia", "USA")
+)
+```
+
+```{r}
+#| label: load-merged-data
+#| include: false
+
+data_dir <- if (dir.exists("data/processed")) {
+  "data/processed"
+} else {
+  "../data/processed"
+}
+
+site_static <- read_csv(
+  file.path(data_dir, "site_static.csv"),
+  show_col_types = FALSE
+)
+
+site_daily <- read_csv(
+  file.path(data_dir, "site_daily.csv"),
+  show_col_types = FALSE
+)
+
+site_daily <- site_daily |>
+  mutate(
+    date = as.Date(date),
+    year = year(date),
+    month = month(date)
+  )
+
+# Add ecosystem classification
+if (!"igbp" %in% names(site_daily)) {
+  site_daily <- site_daily |>
+    left_join(
+      site_static |> select(site_id, igbp),
+      by = "site_id"
+    )
+}
+```
+
+# Materials and methods
+
+The five selected FLUXNET sites differ in ecosystem type, geographical location and temporal coverage. As shown in the Block 4 summary, all sites exhibit incomplete measurement coverage, and the proportion of directly measured flux observations varies among sites and years. Therefore, the flux datasets should be interpreted as partially gap-filled observational products rather than continuous complete measurements. These differences in data availability are important to consider when comparing patterns among sites.
+
+## Study sites
+
+The study comprises five eddy covariance stations distributed across  Asia, Europe and North America, representing contrasting ecosystem  types and climatic conditions. All sites are located in the Northern  Hemisphere, with four sites in temperate or cool-temperate regions  and one in a subtropical region. Differences in vegetation  characteristics, hydrological conditions, land use and temporal  coverage provide a basis for exploring site-specific relationships between environmental drivers and ecosystem functioning.
+
+The selected stations include the Appi deciduous broadleaf forest (JP-Api; DBF) in Japan [@yasuda2026], the Douglas-fir evergreen  needleleaf forest (CA-Ca1; ENF) in British Columbia, Canada  [@black2025], the Rietholzbach grassland (CH-Rtb; GRA) in  Switzerland [@hirschi2026], the Kresin u Pacova cropland  (CZ-KrP; CRO) in Czechia [@acosta2026], and the Everglades  long-hydroperiod permanent wetland (US-Elm; WET) in southern  Florida, United States [@starr2026].
+
+Ecosystem types are described according to the International  Geosphere–Biosphere Programme (IGBP) land-cover classification.  The geographical characteristics and monitoring periods of the  five stations are summarized in @tbl-study-sites, and their spatial distribution is illustrated in @fig-study-sites.
+
+```{r}
+#| label: tbl-study-sites
+#| tbl-cap: "Geographical characteristics, ecosystem classifications and monitoring periods of the five FLUXNET study sites."
+
+site_static |>
+  mutate(
+    ecosystem = recode(
+      igbp,
+      "DBF" = "Deciduous broadleaf forest",
+      "ENF" = "Evergreen needleleaf forest",
+      "GRA" = "Grassland",
+      "CRO" = "Cropland",
+      "WET" = "Permanent wetland"
+    ),
+    country_name = recode(
+      country,
+      "JP" = "Japan",
+      "CA" = "Canada",
+      "CH" = "Switzerland",
+      "CZ" = "Czechia",
+      "US" = "USA"
+    ),
+    period = paste(first_year, last_year, sep = "–")
+  ) |>
+  select(
+    site_id,
+    country_name,
+    igbp,
+    ecosystem,
+    lat,
+    lon,
+    period
+  ) |>
+  rename(
+    "Site" = site_id,
+    "Country" = country_name,
+    "IGBP" = igbp,
+    "Ecosystem type" = ecosystem,
+    "Latitude (°)" = lat,
+    "Longitude (°)" = lon,
+    "Monitoring period" = period
+  ) |>
+  kable(digits = 2)
+```
+
+```{r}
+#| label: fig-study-sites
+#| fig-cap: "Geographical distribution of the five FLUXNET study sites. Colors indicate ecosystem classifications."
+#| fig-width: 10
+#| fig-height: 5
+
+world <- map_data("world")
+
+ggplot() +
+  geom_polygon(
+    data = world,
+    aes(x = long, y = lat, group = group),
+    fill = "#E8E6DF",
+    color = "white",
+    linewidth = 0.15
+  ) +
+  geom_point(
+    data = site_static,
+    aes(x = lon, y = lat, fill = igbp),
+    shape = 21,
+    color = "grey30",
+    size = 4
+  ) +
+  geom_text(
+    data = site_static,
+    aes(x = lon, y = lat, label = site_id),
+    nudge_y = 5,
+    check_overlap = TRUE,
+    size = 3
+  ) +
+  scale_fill_manual(values = eco_cols) +
+  coord_quickmap(
+    xlim = c(-180, 180),
+    ylim = c(-60, 85)
+  ) +
+  labs(fill = "Ecosystem") +
+  theme_void() +
+  theme(
+    panel.background = element_rect(
+      fill = "#E7F2F6",
+      color = NA
+    ),
+    legend.position = "bottom"
+  )
+```
+
+## FLUXNET data and data coverage
+
+Daily FLUXNET observations from the five study sites investigated in Block 4 were used as the basis for this analysis. The datasets include carbon fluxes and meteorological variables processed using standardized FLUXNET procedures (Pastorello et al., 2020).
+
+The preliminary assessment conducted in Block 4 revealed substantial differences in measurement coverage among sites and years. Based on half-hourly NEE quality flags, the proportion of records classified as gap-filled ranged from 31.0% at US-Elm to 68.0% at CA-Ca1. These proportions describe NEE quality flags and do not directly represent the quality or gap-filled fractions of GPP and ecosystem respiration estimates.
+
+No additional gap-filling was performed in the present analysis. Missing observations were retained as missing values and excluded from individual analyses when the required variables were unavailable. The number of valid observations was reported for each analysis where appropriate.
+
+## Complementary environmental datasets
+
+Eight complementary environmental datasets were selected to  characterize the climatic, edaphic and biological conditions  of the five FLUXNET study sites. The datasets differ in spatial  resolution, temporal coverage and methodological approach  (@tbl-provenance). These differences were considered during  data integration and interpretation of the results.
+
+| Dataset | Spatial resolution | Temporal coverage | Data source | Reference |
+|---|---|---|---|---|
+| ERA5-Land | 0.1° (~9 km) | Hourly, 1950–present | [Copernicus CDS](https://cds.climate.copernicus.eu/) | [@munoz2021] |
+| WorldClim 2.1 | 5 arc-min (~9 km at equator) | 1970–2000 normals | [WorldClim](https://worldclim.org/) | [@fick2017] |
+| Dheed | 0.25° | Daily, 1950–2023 | [Zenodo](https://doi.org/10.5281/zenodo.14884254) | [@weynants2025] |
+| SoilGrids 2.0 | 250 m | Static | [ISRIC](https://soilgrids.org/) | [@poggio2021] |
+| PlantTraits | 1 km | Static | [Zenodo](https://doi.org/10.5281/zenodo.14646322) | [@lusk2026] |
+| deadtrees.earth | 10 m | Annual | [deadtrees.earth](https://deadtrees.earth/) | [@mosig2026] |
+| iNaturalist | Georeferenced observations | Variable | [iNaturalist](https://www.inaturalist.org/) | [@inaturalist2026] |
+| MODIS MOD13Q1 | 250 m | 16-day composites | [NASA LP DAAC](https://doi.org/10.5067/MODIS/MOD13Q1.061) | [@didan2021] |
+
+: Provenance and spatiotemporal characteristics of the complementary environmental datasets selected for this study. {#tbl-provenance}
+
+### ERA5-Land
+
+ERA5-Land is a global land surface reanalysis dataset providing hourly environmental variables at a spatial resolution of approximately 9 km [@munoz2021]. Air temperature, soil temperature and volumetric soil water content at three soil depths (0–7, 7–28 and 28–100 cm) were obtained through the Copernicus Climate Data Store (CDS). Data were extracted for the grid cell nearest to each tower, covering up to the final ten years of its FLUXNET monitoring period. Hourly observations were aggregated into daily means.
+
+### WorldClim
+
+WorldClim 2.1 provides spatially interpolated climatic variables derived from meteorological station records [@fick2017]. Long-term climate normals for the period 1970–2000 were extracted at a spatial resolution of 5 arc-minutes (approximately 9 km at the equator). Mean annual temperature (BIO1), annual precipitation (BIO12), temperature seasonality (BIO4) and precipitation seasonality (BIO15) were used to characterize the climatic conditions of the study sites and provide a reference for assessing annual climatic anomalies.
+
+### Dheed
+
+Compound dry-hot extreme events were identified using Dheed, an ERA5-based global database covering the period 1950–2023 [@weynants2025]. The dataset provides daily information at a spatial resolution of 0.25° and identifies compound extreme events through the spatial and temporal connectivity of simultaneously dry and hot conditions.
+
+Daily event labels were extracted for the grid cell corresponding to each FLUXNET tower and integrated with daily carbon flux records using the site identifier and date. The analysis was restricted to the overlapping temporal coverage of both datasets. Consequently, FLUXNET observations from 2024 at US-Elm were excluded from the Dheed analysis.
+
+### SoilGrids
+
+Soil physicochemical properties were obtained from SoilGrids 2.0 [@poggio2021], a global spatial dataset providing predictions of soil characteristics at approximately 250 m resolution. SoilGrids estimates include soil texture, organic carbon and other soil properties at different depths. The extracted values were linked to the five FLUXNET sites using their geographical coordinates.
+
+Because SoilGrids provides model-based predictions rather than direct measurements at the flux towers, these values were treated as estimates of local soil conditions. Missing values were retained as missing, and no additional gap-filling or imputation was performed.
+
+### PlantTraits
+
+Spatially mapped plant functional traits were obtained from the PlantTraits dataset [@lusk2026]. The selected characteristics include specific leaf area (SLA), leaf nitrogen content, rooting depth, leaf area, stem density and plant height. Prediction uncertainty and the area of applicability were considered when interpreting these estimates, particularly for cropland and wetland ecosystems, where the model may have limited applicability.
+
+### deadtrees.earth
+
+Spatial information on tree cover and standing deadwood was obtained from deadtrees.earth [@mosig2026]. The geographical coverage and applicability of the dataset were assessed for the five study sites. Particular attention was given to the interpretation of tree cover and standing deadwood around non-forest ecosystems, such as the grassland CH-Rtb and cropland CZ-KrP.
+
+### iNaturalist
+
+Georeferenced species observation records were obtained from iNaturalist [@inaturalist2026] within the surroundings of each FLUXNET tower. The records were used to characterize documented species occurrences and explore potential relationships between seasonal biological observations and ecosystem productivity. Differences in observation effort, accessibility and reporting activity were considered when comparing species records among sites.
+
+### MODIS
+
+Satellite-derived vegetation information was obtained from the MODIS Terra MOD13Q1 Version 6.1 product, which provides 16-day vegetation index composites at a spatial resolution of 250 m [@didan2021]. The normalized difference vegetation index (NDVI) and enhanced vegetation index (EVI) were calculated from spectral reflectance data and compared with the corresponding official MODIS vegetation indices. These variables were integrated with FLUXNET GPP observations to investigate seasonal relationships between vegetation greenness and ecosystem productivity.
+
+
+## Data preparation and integration
+FLUXNET observations and complementary environmental datasets were integrated using the provided `09_merge.R` script. Two primary tables were generated: a static table containing site-level environmental characteristics and a daily table containing FLUXNET observations and available time-varying environmental variables. Static variables were associated with each tower using the site identifier (`site_id`), while daily observations were matched using the site identifier and date.
+
+Annual datasets, including standing deadwood cover, were considered separately at their corresponding temporal resolution. FLUXNET daily observations are recorded in local standard time, whereas ERA5-Land daily values are aggregated in UTC. This temporal difference was considered when interpreting daily relationships.
+
+```{r}
+#| label: daily-data-coverage
+
+daily_coverage <- site_daily |>
+  group_by(site_id) |>
+  summarise(
+    across(
+      everything(),
+      ~ round(mean(!is.na(.x)) * 100, 1)
+    ),
+    .groups = "drop"
+  )
+
+daily_coverage
+```
+
+## Statistical and graphical analyses
+Exploratory analyses were designed to investigate relationships between environmental variables and ecosystem productivity at each study site. Time series, scatterplots, descriptive statistics and correlation analyses were used where appropriate. Analyses were conducted at temporal resolutions consistent with the characteristics of the corresponding datasets.
+
+Site-specific relationships were examined separately to account for differences in ecosystem type, climatic conditions and measurement periods. Comparisons involving static environmental characteristics were interpreted descriptively because only five independent study sites were available.
+
+# Results
+
+## Site environmental portrait
+
+The environmental characteristics of the five study sites were compared using long-term climatic normals from WorldClim, estimated plant functional traits from PlantTraits and species observation records from iNaturalist. Table 2 summarizes the climatic conditions, vegetation characteristics and recorded biodiversity surrounding each tower.
+
+```{r}
+#| label: tbl-environmental-portrait
+#| tbl-cap: "Climatic, plant functional and biodiversity characteristics of the five FLUXNET study sites."
+
+site_static |>
+  select(
+    site_id,
+    igbp,
+    BIO1,
+    BIO12,
+    SLA,
+    leaf_N_mass,
+    rooting_depth,
+    n_species
+  ) |>
+  rename(
+    "Site ID" = site_id,
+    "Ecosystem" = igbp,
+    "Mean annual temperature (°C)" = BIO1,
+    "Annual precipitation (mm)" = BIO12,
+    "Specific leaf area (m²/kg)" = SLA,
+    "Leaf nitrogen (mg/g)" = leaf_N_mass,
+    "Rooting depth (m)" = rooting_depth,
+    "Recorded species" = n_species
+  ) |>
+  kable(digits = 2)
+```
+
+The four temperate and cool-temperate sites exhibited similar mean annual temperatures, ranging from 7.14 to 7.64 °C, whereas the subtropical wetland US-Elm was considerably warmer (24.15 °C). Annual precipitation varied substantially among sites, with the highest value recorded at CA-Ca1 (1691 mm) and the lowest at CZ-KrP (585 mm).
+
+Estimated specific leaf area and leaf nitrogen content were highest at the cropland site CZ-KrP and lowest at the wetland site US-Elm. The latter also exhibited the greatest estimated rooting depth (0.64 m). However, these trait estimates require further consideration of the model's area of applicability.
+
+The highest numbers of species recorded through iNaturalist were observed at CH-Rtb (280 species) and US-Elm (269 species), while CZ-KrP had the lowest number of recorded species (34).
+
+## ERA5-Land: Soil water and temperature
+
+### Validation of ERA5-Land air temperature
+
+To assess the agreement between ERA5-Land reanalysis data and FLUXNET air temperature records, daily air temperatures from both datasets were compared for each study site. The most recent year with at least 300 paired daily observations was selected independently for each tower. Agreement between the datasets was evaluated using Pearson's correlation coefficient, mean bias and root mean square error (RMSE).
+
+```{r}
+#| label: fig-era5-temperature-validation
+#| fig-cap: "Daily air temperature from FLUXNET and ERA5-Land for the latest year with at least 300 paired observations at each site."
+#| fig-width: 10
+#| fig-height: 8
+
+temperature_check <- site_daily |>
+  filter(
+    !is.na(TA_F),
+    !is.na(era5l_t2m_C)
+  ) |>
+  group_by(site_id, year) |>
+  filter(n() >= 300) |>
+  ungroup() |>
+  group_by(site_id) |>
+  filter(year == max(year)) |>
+  ungroup()
+
+temperature_long <- temperature_check |>
+  select(
+    site_id, igbp, year, date,
+    TA_F, era5l_t2m_C
+  ) |>
+  pivot_longer(
+    cols = c(TA_F, era5l_t2m_C),
+    names_to = "source",
+    values_to = "temperature"
+  )
+
+ggplot(
+  temperature_long,
+  aes(
+    x = date,
+    y = temperature,
+    color = igbp,
+    linetype = source
+  )
+) +
+  geom_line(linewidth = 0.6) +
+  facet_wrap(
+    ~ site_id + year,
+    scales = "free_x",
+    ncol = 2
+  ) +
+  scale_color_manual(values = eco_cols) +
+  scale_linetype_manual(
+    values = c(
+      "TA_F" = "solid",
+      "era5l_t2m_C" = "dashed"
+    ),
+    labels = c(
+      "TA_F" = "FLUXNET",
+      "era5l_t2m_C" = "ERA5-Land"
+    )
+  ) +
+  labs(
+    x = "Date",
+    y = "Daily air temperature (°C)",
+    color = "Ecosystem",
+    linetype = "Data source"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+```
+
+```{r}
+#| label: tbl-temperature-agreement
+#| tbl-cap: "Agreement between daily FLUXNET and ERA5-Land air temperatures."
+
+temperature_stats <- temperature_check |>
+  group_by(site_id, igbp, year) |>
+  summarise(
+    n = n(),
+    correlation = cor(TA_F, era5l_t2m_C),
+    bias = mean(era5l_t2m_C - TA_F),
+    RMSE = sqrt(mean(
+      (era5l_t2m_C - TA_F)^2
+    )),
+    .groups = "drop"
+  )
+
+temperature_stats |>
+  rename(
+    "Site ID" = site_id,
+    "Ecosystem" = igbp,
+    "Year" = year,
+    "Paired days (n)" = n,
+    "Pearson's r" = correlation,
+    "Mean bias (°C)" = bias,
+    "RMSE (°C)" = RMSE
+  ) |>
+  kable(digits = 2)
+```
+
+Daily air temperatures from ERA5-Land and FLUXNET exhibited strong positive correlations across all five study sites, with Pearson's correlation coefficients ranging from 0.91 to approximately 1.00 (Table 3). Both datasets captured the seasonal temperature patterns at each site (Figure 1).
+
+The strongest agreement was observed at CZ-KrP, with an RMSE of 0.72 °C and a mean bias of 0.18 °C. Relatively close agreement was also observed at US-Elm, JP-Api and CH-Rtb, where RMSE values ranged from 1.38 to 1.90 °C.
+
+In contrast, CA-Ca1 exhibited substantially larger temperature discrepancies, with an RMSE of 6.00 °C and a negative mean bias of −4.99 °C. Despite a strong positive correlation (r = 0.91), ERA5-Land systematically underestimated air temperatures at this site. Overall, the comparison comprised 1,826 paired daily observations across the five sites.
+
+### Soil water limitation of productivity
+
+**Research question:** Is there a soil moisture threshold below which summer GPP declines?
+
+To investigate potential soil water limitations on ecosystem productivity, daily gross primary productivity (GPP) from FLUXNET was compared with volumetric soil water content at a depth of 7–28 cm obtained from ERA5-Land. The analysis was restricted to the Northern Hemisphere summer months (June–August). Only paired observations with available values for both variables were included. Site-specific scatterplots and locally weighted regression curves were used to explore potential nonlinear relationships and identify apparent soil moisture thresholds.
+
+```{r}
+#| label: fig-soil-water-gpp
+#| fig-cap: "Relationship between daily volumetric soil water content at 7–28 cm depth and gross primary productivity during June–August across the five study sites."
+#| fig-width: 10
+#| fig-height: 8
+
+summer_data <- site_daily |>
+  filter(
+    month %in% c(6, 7, 8),
+    !is.na(era5l_swvl2),
+    !is.na(GPP_NT_VUT_REF)
+  )
+
+ggplot(
+  summer_data,
+  aes(
+    x = era5l_swvl2,
+    y = GPP_NT_VUT_REF,
+    color = igbp
+  )
+) +
+  geom_point(alpha = 0.3, size = 0.8) +
+  geom_smooth(
+    method = "loess",
+    se = FALSE,
+    linewidth = 1.2
+  ) +
+  facet_wrap(~ site_id, ncol = 2) +
+  scale_color_manual(values = eco_cols) +
+  labs(
+    x = "Volumetric soil water content (m³/m³)",
+    y = "Daily GPP (g C/m²/day)",
+    color = "Ecosystem"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+```
+
+```{r}
+#| label: tbl-soil-water-gpp
+#| tbl-cap: "Descriptive statistics for summer soil water content and gross primary productivity."
+
+soil_stats <- summer_data |>
+  group_by(site_id, igbp) |>
+  summarise(
+    n = n(),
+    n_years = n_distinct(year),
+    mean_sm = mean(era5l_swvl2),
+    min_sm = min(era5l_swvl2),
+    max_sm = max(era5l_swvl2),
+    mean_gpp = mean(GPP_NT_VUT_REF),
+    correlation = cor(
+      era5l_swvl2,
+      GPP_NT_VUT_REF,
+      method = "spearman"
+    ),
+    .groups = "drop"
+  )
+
+soil_stats |>
+  rename(
+    "Site ID" = site_id,
+    "Ecosystem" = igbp,
+    "Paired days (n)" = n,
+    "Years (n)" = n_years,
+    "Mean SWC (m³/m³)" = mean_sm,
+    "Min. SWC (m³/m³)" = min_sm,
+    "Max. SWC (m³/m³)" = max_sm,
+    "Mean GPP (g C/m²/day)" = mean_gpp,
+    "Spearman's rho" = correlation
+  ) |>
+  kable(digits = 3)
+```
+
+The relationship between volumetric soil water content and summer GPP varied among the five study sites (Figure 2). The analysis comprised 4,324 paired daily observations across eight to ten years per site. Spearman's correlation coefficients ranged from −0.228 to 0.300, indicating generally weak associations between soil water content and productivity (Table 4).
+
+The strongest positive association was observed at the cropland site CZ-KrP (ρ = 0.300), where GPP generally increased with soil water content before declining slightly at the upper end of the observed range. In contrast, JP-Api exhibited a negative association (ρ = −0.228), with a reduction in productivity at higher soil water content. The evergreen forest CA-Ca1 and grassland CH-Rtb showed relatively weak relationships (ρ = 0.080 and −0.033, respectively).
+
+The wetland US-Elm exhibited the lowest mean summer GPP (1.17 g C m⁻² day⁻¹), with limited variation in productivity across the observed soil moisture range. Overall, no consistent soil moisture threshold could be visually identified across the five study sites, although CZ-KrP exhibited the clearest reduction in productivity under relatively dry soil conditions.
+
+### Temperature sensitivity of productivity
+
+**Research question:** How does the relationship between air temperature and GPP differ among the five study sites?
+
+To investigate site-specific relationships between air temperature and ecosystem productivity, daily air temperature estimates from ERA5-Land were compared with daily gross primary productivity (GPP) derived from FLUXNET. Only days with available observations for both variables were included. Relationships were visualized separately for each study site using scatterplots and locally weighted regression curves to explore potential nonlinear responses.
+
+```{r}
+#| label: fig-temperature-productivity
+#| fig-cap: "Relationship between ERA5-Land daily air temperature and FLUXNET gross primary productivity across the five study sites."
+#| fig-width: 10
+#| fig-height: 8
+
+temperature_gpp <- site_daily |>
+  filter(
+    !is.na(era5l_t2m_C),
+    !is.na(GPP_NT_VUT_REF)
+  )
+
+ggplot(
+  temperature_gpp,
+  aes(
+    x = era5l_t2m_C,
+    y = GPP_NT_VUT_REF,
+    color = igbp
+  )
+) +
+  geom_point(alpha = 0.2, size = 0.8) +
+  geom_smooth(
+    method = "loess",
+    se = FALSE,
+    linewidth = 1.2
+  ) +
+  facet_wrap(~ site_id, ncol = 2) +
+  scale_color_manual(values = eco_cols) +
+  labs(
+    x = "Daily air temperature (°C)",
+    y = "Daily GPP (g C/m²/day)",
+    color = "Ecosystem"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+```
+
+```{r}
+#| label: tbl-temperature-gpp
+#| tbl-cap: "Descriptive statistics for daily air temperature and gross primary productivity across the five study sites."
+
+temperature_gpp_stats <- temperature_gpp |>
+  group_by(site_id, igbp) |>
+  summarise(
+    n = n(),
+    n_years = n_distinct(year),
+    mean_temp = mean(era5l_t2m_C),
+    min_temp = min(era5l_t2m_C),
+    max_temp = max(era5l_t2m_C),
+    mean_gpp = mean(GPP_NT_VUT_REF),
+    correlation = cor(
+      era5l_t2m_C,
+      GPP_NT_VUT_REF,
+      method = "spearman"
+    ),
+    .groups = "drop"
+  )
+
+temperature_gpp_stats |>
+  rename(
+    "Site ID" = site_id,
+    "Ecosystem" = igbp,
+    "Paired days (n)" = n,
+    "Years (n)" = n_years,
+    "Mean temperature (°C)" = mean_temp,
+    "Min. temperature (°C)" = min_temp,
+    "Max. temperature (°C)" = max_temp,
+    "Mean GPP (g C/m²/day)" = mean_gpp,
+    "Spearman's rho" = correlation
+  ) |>
+  kable(digits = 2)
+```
+
+The relationship between daily air temperature and GPP exhibited distinct patterns among the five study sites (Figure 3). At JP-Api, CA-Ca1 and CH-Rtb, productivity generally increased with air temperature, although the shape and magnitude of the relationships differed among sites. JP-Api exhibited a pronounced increase in productivity above approximately 5–10 °C, while CA-Ca1 showed an apparent plateau at higher temperatures.
+
+In contrast, CZ-KrP exhibited a nonlinear, hump-shaped relationship, with productivity increasing at intermediate temperatures and declining at higher temperatures. The wetland US-Elm showed comparatively little variation in GPP across its observed temperature range. These results indicate substantial site-specific differences in the association between air temperature and ecosystem productivity.
+
+## WorldClim: Climatic variability
+
+### Annual deviations from climate normals
+
+**Research question:** Which tower years were warmer or wetter than the 1970–2000 climate normals?
+
+Annual climatic conditions at each FLUXNET study site were compared with the corresponding long-term climate normals from WorldClim 2.1 for the period 1970–2000 [@fick2017]. Temperature anomalies were calculated as the difference between annual mean air temperature and BIO1, while precipitation anomalies were calculated as the difference between annual cumulative precipitation and BIO12. Data completeness was assessed before calculating annual climate statistics to avoid biases associated with incomplete monitoring years. No additional gap-filling was performed.
+
+Annual temperature and precipitation anomalies varied substantially among the five study sites (@fig-worldclim-annual-anomalies). The cropland site CZ-KrP exhibited a mean temperature anomaly of +1.57 °C, with all ten monitoring years exceeding the historical climate normal. Positive mean temperature anomalies were also observed at CH-Rtb (+0.67 °C) and US-Elm (+0.78 °C), where 11 of 14 and 16 of 17 monitoring years, respectively, were warmer than the corresponding WorldClim reference. In contrast, JP-Api exhibited a negative mean temperature anomaly of −0.83 °C.
+
+Precipitation anomalies differed in both magnitude and direction among sites. Mean annual precipitation was lower than the historical reference at CA-Ca1 (−352.74 mm) and US-Elm (−179.97 mm), whereas CH-Rtb and CZ-KrP exhibited positive mean deviations of 87.51 and 23.77 mm, respectively.
+
+Exceptionally large temperature anomalies were observed at CA-Ca1, particularly between 2007 and 2009, while JP-Api exhibited consistently large positive precipitation anomalies throughout its monitoring period. These discrepancies are apparent in both the annual time series and the summary of interannual variability (@fig-worldclim-mean-sd; @tbl-climate-anomalies). Given their magnitude, these site–variable combinations require additional data quality assessment before ecological interpretation.
+
+```{r}
+#| label: worldclim-annual-data
+
+annual_data <- site_daily |>
+  group_by(site_id, igbp, year) |>
+  summarise(
+    expected_days = if_else(
+      leap_year(first(year)), 366, 365
+    ),
+    n_temp = n_distinct(date[!is.na(TA_F)]),
+    n_prec = n_distinct(date[!is.na(P_F)]),
+    n_gpp = n_distinct(
+      date[!is.na(GPP_NT_VUT_REF)]
+    ),
+    annual_temp = mean(TA_F, na.rm = TRUE),
+    annual_prec = sum(P_F, na.rm = TRUE),
+    annual_gpp = sum(
+      GPP_NT_VUT_REF, na.rm = TRUE
+    ),
+    .groups = "drop"
+  ) |>
+  mutate(
+    temp_coverage = n_temp / expected_days,
+    prec_coverage = n_prec / expected_days,
+    gpp_coverage = n_gpp / expected_days,
+
+    annual_temp = if_else(
+      temp_coverage >= 0.95,
+      annual_temp, NA_real_
+    ),
+    annual_prec = if_else(
+      prec_coverage == 1,
+      annual_prec, NA_real_
+    ),
+    annual_gpp = if_else(
+      gpp_coverage == 1,
+      annual_gpp, NA_real_
+    )
+  )
+```
+
+```{r}
+#| label: worldclim-anomalies
+
+annual_climate <- annual_data |>
+  left_join(
+    site_static |>
+      select(site_id, BIO1, BIO12),
+    by = "site_id"
+  ) |>
+  mutate(
+    temp_anomaly = annual_temp - BIO1,
+    prec_anomaly = annual_prec - BIO12
+  )
+```
+
+```{r}
+#| label: tbl-annual-coverage
+#| tbl-cap: "Availability of annual climate and productivity statistics after applying data completeness criteria."
+
+annual_climate |>
+  group_by(site_id, igbp) |>
+  summarise(
+    total_years = n(),
+    valid_temp = sum(!is.na(annual_temp)),
+    valid_prec = sum(!is.na(annual_prec)),
+    valid_gpp = sum(!is.na(annual_gpp)),
+    .groups = "drop"
+  ) |>
+  rename(
+    "Site ID" = site_id,
+    "Ecosystem" = igbp,
+    "Available years" = total_years,
+    "Temperature" = valid_temp,
+    "Precipitation" = valid_prec,
+    "GPP" = valid_gpp
+  ) |>
+  kable()
+```
+
+```{r}
+#| label: fig-worldclim-annual-anomalies
+#| fig-cap: "Annual temperature (a) and precipitation (b) anomalies relative to the WorldClim 1970–2000 climate normals. Dashed horizontal lines indicate historical reference conditions. All panels share a common calendar-year axis, while vertical scales differ among sites."
+#| fig-width: 11
+#| fig-height: 10
+
+climate_long <- annual_climate |>
+  select(
+    site_id, igbp, year,
+    temp_anomaly, prec_anomaly
+  ) |>
+  pivot_longer(
+    cols = c(temp_anomaly, prec_anomaly),
+    names_to = "variable",
+    values_to = "anomaly"
+  ) |>
+  mutate(
+    variable = factor(
+      variable,
+      levels = c("temp_anomaly", "prec_anomaly"),
+      labels = c(
+        "(a) Temperature anomaly (°C)",
+        "(b) Precipitation anomaly (mm/year)"
+      )
+    )
+  )
+
+p_temp <- ggplot(
+  annual_climate,
+  aes(year, temp_anomaly, fill = igbp)
+) +
+  geom_col(na.rm = TRUE) +
+  geom_hline(yintercept = 0, linetype = "dashed") +
+  facet_wrap(~ site_id, ncol = 1, scales = "free_y") +
+  scale_fill_manual(values = eco_cols) +
+  labs(
+    x = "Year",
+    y = "Temperature anomaly (°C)",
+    fill = "Ecosystem"
+  ) +
+  theme_minimal()
+
+p_prec <- ggplot(
+  annual_climate,
+  aes(year, prec_anomaly, fill = igbp)
+) +
+  geom_col(na.rm = TRUE) +
+  geom_hline(yintercept = 0, linetype = "dashed") +
+  facet_wrap(~ site_id, ncol = 1, scales = "free_y") +
+  scale_fill_manual(values = eco_cols) +
+  labs(
+    x = "Year",
+    y = "Precipitation anomaly (mm/year)",
+    fill = "Ecosystem"
+  ) +
+  theme_minimal()
+
+(p_temp | p_prec) +
+  plot_layout(guides = "collect") +
+  plot_annotation(tag_levels = "a") &
+  theme(
+    legend.position = "bottom",
+    panel.grid.minor = element_blank()
+  )
+```
+
+```{r}
+#| label: fig-worldclim-mean-sd
+#| fig-cap: "Mean annual temperature (a) and precipitation (b) anomalies relative to the WorldClim 1970–2000 climate normals. Points represent site means and horizontal intervals represent ±1 interannual standard deviation."
+#| fig-width: 11
+#| fig-height: 4.5
+
+climate_summary <- annual_climate |>
+  group_by(site_id, igbp) |>
+  summarise(
+    mean_temp = mean(temp_anomaly, na.rm = TRUE),
+    sd_temp = sd(temp_anomaly, na.rm = TRUE),
+    mean_prec = mean(prec_anomaly, na.rm = TRUE),
+    sd_prec = sd(prec_anomaly, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+p_mean_temp <- ggplot(
+  climate_summary,
+  aes(x = mean_temp, y = site_id, color = igbp)
+) +
+  geom_vline(
+    xintercept = 0,
+    linetype = "dashed",
+    color = "grey50"
+  ) +
+  geom_errorbar(
+    aes(
+      xmin = mean_temp - sd_temp,
+      xmax = mean_temp + sd_temp
+    ),
+    orientation = "y",
+    width = 0.15
+  ) +
+  geom_point(size = 3.5) +
+  scale_color_manual(values = eco_cols) +
+  labs(
+    x = "Temperature anomaly (°C)",
+    y = NULL,
+    color = "Ecosystem"
+  ) +
+  theme_minimal()
+
+p_mean_prec <- ggplot(
+  climate_summary,
+  aes(x = mean_prec, y = site_id, color = igbp)
+) +
+  geom_vline(
+    xintercept = 0,
+    linetype = "dashed",
+    color = "grey50"
+  ) +
+  geom_errorbar(
+    aes(
+      xmin = mean_prec - sd_prec,
+      xmax = mean_prec + sd_prec
+    ),
+    orientation = "y",
+    width = 0.15
+  ) +
+  geom_point(size = 3.5) +
+  scale_color_manual(values = eco_cols) +
+  labs(
+    x = "Precipitation anomaly (mm/year)",
+    y = NULL,
+    color = "Ecosystem"
+  ) +
+  theme_minimal()
+
+(p_mean_temp | p_mean_prec) +
+  plot_layout(guides = "collect") +
+  plot_annotation(tag_levels = "a") &
+  theme(
+    legend.position = "bottom",
+    panel.grid.minor = element_blank()
+  )
+```
+
+```{r}
+#| label: tbl-climate-anomalies
+#| tbl-cap: "Mean annual climatic anomalies, interannual variability and frequency of warmer and drier years relative to WorldClim 1970–2000 climate normals."
+
+climate_stats <- annual_climate |>
+  group_by(site_id, igbp) |>
+  summarise(
+    mean_temp = mean(temp_anomaly, na.rm = TRUE),
+    sd_temp = sd(temp_anomaly, na.rm = TRUE),
+    warmer_years = sum(temp_anomaly > 0, na.rm = TRUE),
+    valid_temp = sum(!is.na(temp_anomaly)),
+    mean_prec = mean(prec_anomaly, na.rm = TRUE),
+    sd_prec = sd(prec_anomaly, na.rm = TRUE),
+    drier_years = sum(prec_anomaly < 0, na.rm = TRUE),
+    valid_prec = sum(!is.na(prec_anomaly)),
+    .groups = "drop"
+  )
+
+climate_stats |>
+  mutate(
+    temperature = sprintf(
+      "%.2f ± %.2f", mean_temp, sd_temp
+    ),
+    precipitation = sprintf(
+      "%.1f ± %.1f", mean_prec, sd_prec
+    ),
+    warmer = paste0(warmer_years, "/", valid_temp),
+    drier = paste0(drier_years, "/", valid_prec)
+  ) |>
+  select(
+    site_id, igbp, temperature,
+    warmer, precipitation, drier
+  ) |>
+  rename(
+    "Site ID" = site_id,
+    "Ecosystem" = igbp,
+    "ΔT (°C), mean ± SD" = temperature,
+    "Warmer years" = warmer,
+    "ΔP (mm), mean ± SD" = precipitation,
+    "Drier years" = drier
+  ) |>
+  kable()
+```
+
+Note: ΔT and ΔP represent deviations from the WorldClim 1970–2000 temperature and precipitation normals, respectively. Only years meeting the corresponding data completeness criteria were included.
+
+
+### Climatic anomalies and productivity
+
+**Research question:** How do interannual deviations in ecosystem productivity relate to annual temperature and precipitation anomalies?
+
+To facilitate comparisons of interannual productivity variability among sites with contrasting absolute productivity levels, annual GPP was expressed as a percentage deviation from the mean annual GPP of each site's available complete monitoring years. Relative GPP anomalies were compared with annual temperature and precipitation anomalies. Positive GPP anomalies indicate higher-than-average productivity, whereas negative values indicate lower-than-average productivity.
+
+```{r}
+#| label: worldclim-gpp-anomalies
+
+annual_productivity <- annual_climate |>
+  group_by(site_id) |>
+  mutate(
+    mean_annual_gpp = mean(
+      annual_gpp, na.rm = TRUE
+    ),
+    gpp_anomaly_pct = if_else(
+      mean_annual_gpp > 0,
+      100 * (annual_gpp - mean_annual_gpp) /
+        mean_annual_gpp,
+      NA_real_
+    )
+  ) |>
+  ungroup()
+```
+
+```{r}
+#| label: fig-climate-productivity-anomalies
+#| fig-cap: "Relationships between relative annual GPP anomalies and annual temperature (a) and precipitation (b) anomalies. Horizontal dashed lines indicate mean site productivity, while vertical dashed lines indicate WorldClim climate normals. Each point represents one monitoring year. Horizontal scales differ among sites, whereas vertical scales are consistent."
+#| fig-width: 11
+#| fig-height: 10
+
+p_gpp_temp <- ggplot(
+  annual_productivity,
+  aes(
+    x = temp_anomaly,
+    y = gpp_anomaly_pct,
+    color = igbp
+  )
+) +
+  geom_hline(
+    yintercept = 0,
+    linetype = "dashed",
+    color = "grey50"
+  ) +
+  geom_vline(
+    xintercept = 0,
+    linetype = "dashed",
+    color = "grey50"
+  ) +
+  geom_point(size = 2.8, alpha = 0.85, na.rm = TRUE) +
+  facet_wrap(~ site_id, ncol = 1, scales = "free_x") +
+  scale_color_manual(values = eco_cols) +
+  labs(
+    x = "Temperature anomaly (°C)",
+    y = "Relative GPP anomaly (%)",
+    color = "Ecosystem"
+  ) +
+  theme_minimal()
+
+p_gpp_prec <- ggplot(
+  annual_productivity,
+  aes(
+    x = prec_anomaly,
+    y = gpp_anomaly_pct,
+    color = igbp
+  )
+) +
+  geom_hline(
+    yintercept = 0,
+    linetype = "dashed",
+    color = "grey50"
+  ) +
+  geom_vline(
+    xintercept = 0,
+    linetype = "dashed",
+    color = "grey50"
+  ) +
+  geom_point(size = 2.8, alpha = 0.85, na.rm = TRUE) +
+  facet_wrap(~ site_id, ncol = 1, scales = "free_x") +
+  scale_color_manual(values = eco_cols) +
+  labs(
+    x = "Precipitation anomaly (mm/year)",
+    y = "Relative GPP anomaly (%)",
+    color = "Ecosystem"
+  ) +
+  theme_minimal()
+
+(p_gpp_temp | p_gpp_prec) +
+  plot_layout(guides = "collect") +
+  plot_annotation(tag_levels = "a") &
+  theme(
+    legend.position = "bottom",
+    panel.grid.minor = element_blank()
+  )
+```
+
+```{r}
+#| label: tbl-climate-gpp-correlations
+#| tbl-cap: "Site-specific Spearman rank correlations between annual climatic anomalies and relative annual GPP anomalies."
+
+climate_gpp_stats <- annual_productivity |>
+  group_by(site_id, igbp) |>
+  summarise(
+    n_temp = sum(
+      complete.cases(temp_anomaly, gpp_anomaly_pct)
+    ),
+    rho_temp = cor(
+      temp_anomaly,
+      gpp_anomaly_pct,
+      method = "spearman",
+      use = "complete.obs"
+    ),
+    n_prec = sum(
+      complete.cases(prec_anomaly, gpp_anomaly_pct)
+    ),
+    rho_prec = cor(
+      prec_anomaly,
+      gpp_anomaly_pct,
+      method = "spearman",
+      use = "complete.obs"
+    ),
+    .groups = "drop"
+  )
+
+climate_gpp_stats |>
+  rename(
+    "Site ID" = site_id,
+    "Ecosystem" = igbp,
+    "Paired T years (n)" = n_temp,
+    "Temperature (ρ)" = rho_temp,
+    "Paired P years (n)" = n_prec,
+    "Precipitation (ρ)" = rho_prec
+  ) |>
+  kable(digits = 3)
+```
+
+Relationships between annual climatic anomalies and relative GPP anomalies differed among the five study sites (@fig-climate-productivity-anomalies). The strongest associations were observed at the grassland site CH-Rtb, where annual productivity was positively correlated with temperature anomalies (ρ = 0.714) and negatively correlated with precipitation anomalies (ρ = −0.593), based on 13 paired monitoring years.
+
+The cropland CZ-KrP exhibited weak correlations with both temperature and precipitation anomalies (ρ = −0.030 and 0.127, respectively). Similarly, annual productivity at the deciduous broadleaf forest JP-Api showed virtually no association with temperature anomalies (ρ = 0.002). The wetland US-Elm exhibited negative correlations with temperature and precipitation anomalies, although both relationships were relatively weak. US-Elm also displayed the greatest apparent variability in relative annual productivity among the five sites.
+
+Overall, the direction and magnitude of climatic associations varied among sites (@tbl-climate-gpp-correlations). Relationships involving temperature at CA-Ca1 and precipitation at JP-Api should be considered provisional due to the unusually large climatic deviations identified in the preceding analysis.
+
+## Dheed: Compound extreme events
+
+### Identification of dry-hot extreme events
+
+Compound dry-hot extreme events were infrequently identified across the five FLUXNET study sites (Table 10; Figure 8). A total of six events, comprising 32 site-specific event days, were identified across four sites. The grassland CH-Rtb exhibited the highest exposure, with three events comprising 16 days (0.31% of the monitoring period). The cropland CZ-KrP experienced one event lasting nine days (0.25%), whereas JP-Api and US-Elm each experienced one event lasting three and four days, respectively. No compound dry-hot extreme events were identified at the evergreen needleleaf forest CA-Ca1 during its monitoring period.
+
+The temporal distribution of events was uneven among sites, and the number of identified events was insufficient to establish systematic differences in extreme-event exposure among ecosystem types. Furthermore, differences in monitoring duration and climatic conditions may influence the number of events detected at each site.
+
+```{r}
+#| label: dheed-data-preparation
+
+dheed_daily <- site_daily |>
+  filter(
+    date >= as.Date("1950-01-01"),
+    date <= as.Date("2023-12-31"),
+    !is.na(dheed_event)
+  ) |>
+  mutate(
+    calendar_day = format(date, "%m-%d")
+  ) |>
+  arrange(site_id, date)
+
+dheed_events <- dheed_daily |>
+  filter(
+    dheed_event == TRUE,
+    !is.na(dheed_label)
+  ) |>
+  group_by(site_id, igbp, dheed_label) |>
+  summarise(
+    start_date = min(date),
+    end_date = max(date),
+    event_days = n_distinct(date),
+    .groups = "drop"
+  )
+```
+
+Extreme-event exposure was characterized by the number of distinct compound dry-hot events, the total number of event days, and the mean and maximum number of days associated with an individual event at each tower. Event-day frequency was additionally expressed as a percentage of available tower-days to account for differences in monitoring periods among sites.
+
+```{r}
+#| label: tbl-dheed-exposure
+#| tbl-cap: "Frequency and duration of compound dry-hot extreme events across the five FLUXNET study sites."
+
+dheed_exposure <- dheed_daily |>
+  group_by(site_id, igbp) |>
+  summarise(
+    years = n_distinct(year),
+    available_days = n_distinct(date),
+    event_days = n_distinct(
+      date[dheed_event == TRUE]
+    ),
+    event_pct = 100 * event_days / available_days,
+    .groups = "drop"
+  ) |>
+  left_join(
+    dheed_events |>
+      group_by(site_id, igbp) |>
+      summarise(
+        n_events = n(),
+        mean_duration = mean(event_days),
+        max_duration = max(event_days),
+        .groups = "drop"
+      ),
+    by = c("site_id", "igbp")
+  ) |>
+  mutate(
+    n_events = replace_na(n_events, 0L)
+  )
+
+dheed_exposure |>
+  select(
+    site_id, igbp, years, n_events,
+    event_days, event_pct,
+    mean_duration, max_duration
+  ) |>
+  rename(
+    "Site ID" = site_id,
+    "Ecosystem" = igbp,
+    "Years (n)" = years,
+    "Events (n)" = n_events,
+    "Event days (n)" = event_days,
+    "Event days (%)" = event_pct,
+    "Mean event days" = mean_duration,
+    "Max. event days" = max_duration
+  ) |>
+  kable(digits = 2)
+```
+
+```{r}
+#| label: fig-dheed-timeline
+#| fig-cap: "Temporal distribution of compound dry-hot extreme events at the five study sites. Gray segments indicate the temporal extent of tower records overlapping with Dheed. Points indicate event onset at each tower, and point size represents the number of event days at that tower."
+#| fig-width: 10
+#| fig-height: 4.5
+
+dheed_periods <- dheed_daily |>
+  group_by(site_id, igbp) |>
+  summarise(
+    first_date = min(date),
+    last_date = max(date),
+    .groups = "drop"
+  )
+
+ggplot() +
+  geom_segment(
+    data = dheed_periods,
+    aes(
+      x = first_date,
+      xend = last_date,
+      y = site_id,
+      yend = site_id
+    ),
+    color = "grey85",
+    linewidth = 2
+  ) +
+  geom_point(
+    data = dheed_events,
+    aes(
+      x = start_date,
+      y = site_id,
+      color = igbp,
+      size = event_days
+    ),
+    alpha = 0.8
+  ) +
+  scale_color_manual(values = eco_cols) +
+  scale_size_continuous(range = c(2, 7)) +
+  scale_x_date(
+    date_breaks = "4 years",
+    date_labels = "%Y"
+  ) +
+  scale_y_discrete(limits = rev) +
+  labs(
+    x = "Year",
+    y = NULL,
+    color = "Ecosystem",
+    size = "Event days"
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "bottom",
+    panel.grid.minor = element_blank()
+  )
+```
+
+### Carbon fluxes during extreme events
+
+**Research question:** How do GPP and NEE during extreme events compare with the same calendar days in other years?
+
+To assess ecosystem carbon flux responses to compound dry-hot extreme events, daily GPP and NEE during event days were compared with the corresponding calendar dates in other monitoring years at the same site. Reference observations were restricted to days without identified compound dry-hot events, excluding observations from the year of the target event. Flux anomalies were calculated as the difference between the observed daily flux during the event and the mean flux of the corresponding reference days. A minimum of three valid reference observations was required for each flux anomaly. No additional gap-filling was performed.
+
+```{r}
+#| label: dheed-matched-reference
+
+# Convert the carbon fluxes into long format
+dheed_flux <- dheed_daily |>
+  select(
+    site_id, igbp, date, year,
+    calendar_day, dheed_event, dheed_label,
+    GPP_NT_VUT_REF, NEE_VUT_REF
+  ) |>
+  pivot_longer(
+    cols = c(GPP_NT_VUT_REF, NEE_VUT_REF),
+    names_to = "flux",
+    values_to = "observed"
+  ) |>
+  mutate(
+    flux = recode(
+      flux,
+      "GPP_NT_VUT_REF" = "GPP",
+      "NEE_VUT_REF" = "NEE"
+    )
+  )
+
+# Reference observations from non-event days
+dheed_reference <- dheed_flux |>
+  filter(
+    dheed_event == FALSE,
+    !is.na(observed)
+  ) |>
+  select(
+    site_id, calendar_day, flux,
+    reference_year = year,
+    reference_value = observed
+  )
+
+# Match the same calendar dates in other years
+dheed_anomalies <- dheed_flux |>
+  left_join(
+    dheed_reference,
+    by = c("site_id", "calendar_day", "flux"),
+    relationship = "many-to-many"
+  ) |>
+  filter(
+    is.na(reference_year) |
+      reference_year != year
+  ) |>
+  group_by(
+    site_id, igbp, date, year,
+    dheed_event, dheed_label, flux, observed
+  ) |>
+  summarise(
+    n_reference = sum(!is.na(reference_value)),
+    reference_mean = mean(
+      reference_value, na.rm = TRUE
+    ),
+    .groups = "drop"
+  ) |>
+  mutate(
+    anomaly = if_else(
+      n_reference >= 3,
+      observed - reference_mean,
+      NA_real_
+    )
+  )
+
+# Retain event days with valid flux anomalies
+dheed_event_anomalies <- dheed_anomalies |>
+  filter(
+    dheed_event == TRUE,
+    !is.na(dheed_label),
+    !is.na(anomaly)
+  )
+```
+
+```{r}
+#| label: dheed-event-responses
+
+dheed_event_responses <- dheed_event_anomalies |>
+  group_by(
+    site_id, igbp, dheed_label, flux
+  ) |>
+  summarise(
+    paired_days = n(),
+    mean_observed = mean(observed),
+    mean_reference = mean(reference_mean),
+    mean_anomaly = mean(anomaly),
+    .groups = "drop"
+  )
+```
+
+```{r}
+#| label: prepare-dheed-figures
+
+# Add event dates to the carbon flux summaries
+dheed_plot_data <- dheed_event_responses |>
+  left_join(
+    dheed_events |>
+      select(
+        site_id,
+        igbp,
+        dheed_label,
+        start_date,
+        end_date
+      ),
+    by = c("site_id", "igbp", "dheed_label")
+  ) |>
+  mutate(
+    event_id = paste0(
+      site_id, " (",
+      format(start_date, "%d %b %Y"),
+      ")"
+    )
+  )
+
+# Order the events by site and date
+event_order <- dheed_plot_data |>
+  arrange(site_id, start_date) |>
+  pull(event_id) |>
+  unique()
+
+dheed_plot_data <- dheed_plot_data |>
+  mutate(
+    event_id = factor(
+      event_id,
+      levels = rev(event_order)
+    )
+  )
+
+```
+
+
+```{r}
+#| label: fig-dheed-carbon-responses
+#| fig-cap: "Observed daily GPP and NEE during individual compound dry-hot events compared with the mean flux of the same calendar dates in non-event years. Hollow circles represent reference means, colored circles represent observed event means, and connecting lines indicate differences between the two conditions."
+#| fig-width: 10
+#| fig-height: 6
+
+ggplot(
+  dheed_plot_data,
+  aes(y = event_id)
+) +
+  geom_segment(
+    aes(
+      x = mean_reference,
+      xend = mean_observed,
+      yend = event_id
+    ),
+    color = "grey65",
+    linewidth = 1
+  ) +
+  geom_point(
+    aes(x = mean_reference),
+    shape = 21,
+    fill = "white",
+    color = "grey40",
+    size = 3,
+    stroke = 1
+  ) +
+  geom_point(
+    aes(
+      x = mean_observed,
+      color = igbp
+    ),
+    size = 3.5
+  ) +
+  facet_wrap(
+    ~ flux,
+    ncol = 2,
+    scales = "free_x"
+  ) +
+  scale_color_manual(values = eco_cols) +
+  labs(
+    x = "Mean daily carbon flux (g C/m²/day)",
+    y = NULL,
+    color = "Ecosystem"
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "bottom",
+    panel.grid.minor = element_blank(),
+    strip.text = element_text(face = "bold")
+  )
+```
+
+
+```{r}
+#| label: fig-dheed-event-means
+#| fig-cap: "Mean daily GPP and NEE anomalies during six compound dry-hot events across four FLUXNET sites. Each point represents one event. Anomalies were calculated relative to non-event observations from the same calendar dates in other years. Dashed vertical lines indicate zero anomaly."
+#| fig-width: 10
+#| fig-height: 6
+
+ggplot(
+  dheed_plot_data,
+  aes(
+    x = mean_anomaly,
+    y = event_id,
+    color = igbp
+  )
+) +
+  geom_vline(
+    xintercept = 0,
+    linetype = "dashed",
+    color = "grey40"
+  ) +
+  geom_segment(
+    aes(
+      x = 0,
+      xend = mean_anomaly,
+      yend = event_id
+    ),
+    linewidth = 0.8,
+    alpha = 0.6
+  ) +
+  geom_point(
+    size = 3.5
+  ) +
+  facet_wrap(
+    ~ flux,
+    ncol = 2
+  ) +
+  scale_color_manual(values = eco_cols) +
+  labs(
+    x = "Mean daily flux anomaly (g C/m²/day)",
+    y = NULL,
+    color = "Ecosystem"
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "bottom",
+    panel.grid.minor = element_blank(),
+    strip.text = element_text(face = "bold")
+  )
+```
+
+```{r}
+#| label: tbl-dheed-carbon-responses
+#| tbl-cap: "Summary of event-level GPP and NEE anomalies during compound dry-hot extreme events."
+
+dheed_response_stats <- dheed_event_responses |>
+  group_by(site_id, igbp, flux) |>
+  summarise(
+    n_events = n(),
+    n_days = sum(paired_days),
+    mean_response = mean(mean_anomaly),
+    sd_response = sd(mean_anomaly),
+    median_response = median(mean_anomaly),
+    .groups = "drop"
+  )
+
+dheed_response_stats |>
+  rename(
+    "Site ID" = site_id,
+    "Ecosystem" = igbp,
+    "Carbon flux" = flux,
+    "Events (n)" = n_events,
+    "Paired days (n)" = n_days,
+    "Mean anomaly" = mean_response,
+    "SD" = sd_response,
+    "Median anomaly" = median_response
+  ) |>
+  kable(digits = 2)
+```
+
+*Note:* Carbon flux anomalies are expressed in g C m⁻² day⁻¹. Each event-level anomaly represents the mean difference between observed daily fluxes and corresponding calendar-day reference values. Standard deviations describe variability among independent event-level means and are therefore unavailable for sites with only one identified event. CA-Ca1 was excluded from the flux comparison because no compound dry-hot events were identified during its monitoring period.
+
+Carbon flux anomalies during compound dry-hot extreme events varied in magnitude and direction among the study sites (Figures 9–10; Table 11). At the cropland CZ-KrP, the nine identified event days were associated with a mean reduction in gross primary productivity (GPP) of 3.38 g C m⁻² day⁻¹ relative to the corresponding non-event reference conditions. In contrast, positive mean GPP anomalies were observed at the deciduous forest JP-Api (+3.30 g C m⁻² day⁻¹) and the wetland US-Elm (+1.63 g C m⁻² day⁻¹).
+
+At the grassland CH-Rtb, the three identified events exhibited contrasting GPP anomalies, resulting in a relatively small positive mean anomaly (+0.68 g C m⁻² day⁻¹). Net ecosystem exchange (NEE) anomalies were positive at CH-Rtb (+1.72 g C m⁻² day⁻¹) and US-Elm (+1.16 g C m⁻² day⁻¹), whereas negative anomalies were observed at CZ-KrP (−0.83 g C m⁻² day⁻¹) and JP-Api (−1.14 g C m⁻² day⁻¹).
+
+Overall, the results indicate heterogeneous carbon flux conditions during the identified compound dry-hot events. However, only six events were identified across four sites, with a single event at three of those sites. Consequently, the observed differences should be interpreted descriptively and cannot establish systematic ecosystem-specific responses to compound climatic extremes.
+
+
+### Post-event productivity recovery
+
+**Research question:** How does gross primary productivity change before, during and after compound dry-hot extreme events, and is there evidence of post-event productivity recovery?
+
+To investigate short-term changes in ecosystem productivity, daily gross primary productivity (GPP) was examined during the 14 days preceding and following each identified compound dry-hot extreme event. GPP observations were compared with reference values derived from the same calendar days in other monitoring years without identified compound events. At least three reference observations were required for each calendar day.
+
+The two closely spaced events identified at CH-Rtb in July–August 2018 were combined into a single disturbance episode for the recovery analysis to avoid overlapping event windows. All other events were examined individually. The analysis focused on changes in productivity relative to reference conditions rather than assuming that extreme events necessarily reduce GPP. No additional gap-filling was performed.
+
+```{r}
+#| label: prepare-recovery
+#| include: false
+
+# 1. Combine overlapping events into disturbance episodes
+
+recovery_episodes <- dheed_events |>
+  mutate(
+    start_date = as.Date(start_date),
+    end_date = as.Date(end_date),
+    episode_key = if_else(
+      site_id == "CH-Rtb" &
+        year(start_date) == 2018,
+      "CH-Rtb-2018",
+      paste0(site_id, "-", start_date)
+    )
+  ) |>
+  group_by(episode_key) |>
+  summarise(
+    site_id = first(site_id),
+    igbp = first(igbp),
+    start_date = min(start_date),
+    end_date = max(end_date),
+    original_events = n(),
+    .groups = "drop"
+  ) |>
+  mutate(
+    episode_id = paste0(
+      site_id, " (",
+      format(start_date, "%d %b %Y"), ")"
+    ),
+    episode_length = as.integer(end_date - start_date) + 1
+  )
+
+# 2. Prepare daily FLUXNET data
+
+daily_recovery <- site_daily |>
+  mutate(
+    date = as.Date(date),
+    year = year(date),
+    calendar_day = format(date, "%m-%d")
+  )
+
+# 3. Create a reference and observation window for each episode
+
+recovery_data <- bind_rows(
+  lapply(seq_len(nrow(recovery_episodes)), function(i) {
+
+    episode <- recovery_episodes[i, ]
+
+    start <- episode$start_date
+    end <- episode$end_date
+    target_year <- year(start)
+
+    # Reference: same calendar days in other non-event years
+
+    reference <- daily_recovery |>
+      filter(
+        site_id == episode$site_id,
+        year != target_year,
+        !is.na(dheed_event),
+        dheed_event == FALSE,
+        !is.na(GPP_NT_VUT_REF)
+      ) |>
+      group_by(calendar_day) |>
+      summarise(
+        n_reference = n(),
+        reference_gpp = mean(GPP_NT_VUT_REF),
+        .groups = "drop"
+      ) |>
+      mutate(
+        reference_gpp = if_else(
+          n_reference >= 3,
+          reference_gpp,
+          NA_real_
+        )
+      )
+
+    # 14 days before and after each episode
+
+    daily_recovery |>
+      filter(
+        site_id == episode$site_id,
+        date >= start - 14,
+        date <= end + 14
+      ) |>
+      left_join(reference, by = "calendar_day") |>
+      mutate(
+        episode_id = episode$episode_id,
+        relative_day = as.integer(date - start),
+        phase = case_when(
+          date < start ~ "Before",
+          date > end ~ "After",
+          TRUE ~ "During"
+        ),
+        gpp_anomaly = GPP_NT_VUT_REF - reference_gpp,
+        event_day = !is.na(dheed_event) & dheed_event &
+          date >= start & date <= end
+      )
+  })
+)
+```
+
+#### Availability of GPP observations
+
+The availability of paired FLUXNET observations and reference values was evaluated separately for the periods before, during and after each disturbance episode. This assessment identifies whether the available data are sufficient to describe short-term productivity changes.
+
+```{r}
+#| label: tbl-recovery-coverage
+#| tbl-cap: "Availability of paired GPP observations and reference values before, during and after compound dry-hot disturbance episodes."
+
+recovery_coverage <- recovery_data |>
+  mutate(
+    paired = !is.na(GPP_NT_VUT_REF) &
+      !is.na(reference_gpp)
+  ) |>
+  group_by(episode_id, phase) |>
+  summarise(
+    paired_days = sum(paired),
+    .groups = "drop"
+  ) |>
+  pivot_wider(
+    names_from = phase,
+    values_from = paired_days,
+    values_fill = 0
+  ) |>
+  select(episode_id, Before, During, After)
+
+recovery_coverage |>
+  rename(
+    "Disturbance episode" = episode_id,
+    "Before (days)" = Before,
+    "During (days)" = During,
+    "After (days)" = After
+  ) |>
+  knitr::kable()
+```
+
+*Note:* The number of paired observations refers to days for which both FLUXNET GPP and corresponding reference values were available. The calendar span of a disturbance episode may include intervening days that were not classified as extreme.
+
+#### Temporal changes in gross primary productivity
+
+Daily GPP trajectories were compared with the corresponding reference conditions to examine whether productivity declined during extreme events and subsequently approached typical seasonal values. Individual disturbance episodes were visualized separately to account for differences in ecosystem characteristics and baseline productivity.
+
+```{r}
+#| label: fig-dheed-recovery
+#| fig-cap: "Daily gross primary productivity before, during and after five compound dry-hot disturbance episodes. Solid lines represent FLUXNET GPP estimates and dashed lines represent non-event calendar-day reference values. Shaded areas indicate disturbance periods, and colored points identify days classified as extreme."
+#| fig-width: 11
+#| fig-height: 10
+
+# Convert observations and reference values into long format
+
+recovery_long <- recovery_data |>
+  select(
+    episode_id, igbp, relative_day,
+    GPP_NT_VUT_REF, reference_gpp
+  ) |>
+  pivot_longer(
+    cols = c(GPP_NT_VUT_REF, reference_gpp),
+    names_to = "data_source",
+    values_to = "gpp"
+  ) |>
+  mutate(
+    data_source = recode(
+      data_source,
+      "GPP_NT_VUT_REF" = "FLUXNET GPP",
+      "reference_gpp" = "Reference GPP"
+    )
+  )
+
+# Disturbance intervals for shaded backgrounds
+
+episode_periods <- recovery_episodes |>
+  mutate(
+    xmin = -0.5,
+    xmax = episode_length - 0.5
+  )
+
+# Plot the five disturbance episodes
+
+ggplot() +
+  geom_rect(
+    data = episode_periods,
+    aes(
+      xmin = xmin,
+      xmax = xmax,
+      ymin = -Inf,
+      ymax = Inf
+    ),
+    fill = "#E9C46A",
+    alpha = 0.15
+  ) +
+  geom_line(
+    data = recovery_long,
+    aes(
+      x = relative_day,
+      y = gpp,
+      color = igbp,
+      linetype = data_source,
+      group = data_source
+    ),
+    linewidth = 0.8,
+    na.rm = TRUE
+  ) +
+  geom_point(
+    data = recovery_data |>
+      filter(event_day, !is.na(GPP_NT_VUT_REF)),
+    aes(
+      x = relative_day,
+      y = GPP_NT_VUT_REF,
+      color = igbp
+    ),
+    size = 1.8
+  ) +
+  facet_wrap(
+    ~ episode_id,
+    ncol = 2,
+    scales = "free_y"
+  ) +
+  scale_color_manual(values = eco_cols) +
+  scale_linetype_manual(
+    values = c(
+      "FLUXNET GPP" = "solid",
+      "Reference GPP" = "dashed"
+    )
+  ) +
+  labs(
+    x = "Days relative to episode onset",
+    y = "Daily GPP (g C/m²/day)",
+    color = "Ecosystem",
+    linetype = "Data source"
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "bottom",
+    strip.text = element_text(face = "bold"),
+    panel.grid.minor = element_blank()
+  )
+```
+
+#### Productivity anomalies relative to reference conditions
+
+To further examine the response of ecosystem productivity to compound dry-hot extremes, daily GPP anomalies were calculated as the difference between FLUXNET GPP estimates and the corresponding non-event calendar-day reference values. Negative anomalies indicate lower productivity than the reference, while positive anomalies indicate higher productivity. This approach facilitates the identification of potential productivity losses and subsequent changes following disturbance events.
+
+```{r}
+#| label: fig-dheed-recovery-anomaly
+#| fig-cap: "Daily GPP anomalies relative to non-event calendar-day reference values across five compound dry-hot disturbance episodes. Dashed horizontal lines indicate zero anomaly, while shaded areas represent the disturbance periods. Colored points identify Dheed-flagged event days."
+#| fig-width: 11
+#| fig-height: 10
+
+ggplot(
+  recovery_data,
+  aes(
+    x = relative_day,
+    y = gpp_anomaly,
+    color = igbp
+  )
+) +
+  geom_rect(
+    data = episode_periods,
+    aes(
+      xmin = xmin,
+      xmax = xmax,
+      ymin = -Inf,
+      ymax = Inf
+    ),
+    inherit.aes = FALSE,
+    fill = "#E9C46A",
+    alpha = 0.15
+  ) +
+  geom_hline(
+    yintercept = 0,
+    linetype = "dashed",
+    color = "grey50"
+  ) +
+  geom_line(
+    linewidth = 0.8,
+    na.rm = TRUE
+  ) +
+  geom_point(
+    data = recovery_data |>
+      filter(event_day, !is.na(gpp_anomaly)),
+    size = 2
+  ) +
+  facet_wrap(
+    ~ episode_id,
+    ncol = 2,
+    scales = "free_y"
+  ) +
+  scale_color_manual(values = eco_cols) +
+  labs(
+    x = "Days relative to episode onset",
+    y = "GPP anomaly (g C/m²/day)",
+    color = "Ecosystem"
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "bottom",
+    strip.text = element_text(face = "bold"),
+    panel.grid.minor = element_blank()
+  )
+```
+
+The temporal trajectories of GPP revealed contrasting productivity responses across the five disturbance episodes (Figures 11 and 12). At the grassland site CH-Rtb, the August 2022 event was followed by a pronounced decline in productivity, with GPP remaining below the calendar-day reference during much of the subsequent observation period. In contrast, during the combined July–August 2018 disturbance episode, productivity was generally higher than reference conditions, including during the post-event period.
+
+At the cropland site CZ-KrP, GPP remained consistently below reference conditions before, during and after the 2018 extreme event. This indicates that reduced productivity was not restricted to the disturbance period. Conversely, the deciduous forest JP-Api and wetland US-Elm generally exhibited positive GPP anomalies during their respective events, although considerable temporal variability was observed.
+
+Overall, the direction and magnitude of productivity anomalies differed substantially among events and ecosystem types. A consistent reduction in GPP during compound dry-hot events was not observed, and evidence of post-event recovery was limited. The presence of pre-event anomalies and the small number of disturbance episodes restrict the extent to which these patterns can be attributed to extreme climatic conditions.
+
+
+## SoilGrids: Soil properties
+
+Soil characteristics influence water storage, nutrient availability and vegetation functioning. To characterize the soil conditions at the five FLUXNET sites, estimates of clay, sand, silt and soil organic carbon (SOC) were obtained from SoilGrids 2.0, a global soil mapping product based on machine-learning predictions [@poggio2021].
+
+Soil properties were extracted at the coordinates of each tower for the uppermost soil layer (0–5 cm). Texture fractions were expressed as percentages, whereas SOC was expressed in g/kg. The analysis focused on site-level differences in predicted soil characteristics and their potential association with ecosystem productivity under contrasting soil moisture conditions.
+
+### Soil characteristics and data availability
+
+The availability of SoilGrids predictions was assessed for all five study sites. Missing values were retained as missing rather than being replaced with estimates from surrounding locations. Because SoilGrids provides spatial predictions rather than direct field measurements, the extracted values were used to characterize broad soil differences among sites.
+
+
+```{r}
+#| label: tbl-soil-properties
+#| tbl-cap: "Predicted surface soil properties (0–5 cm) at the five FLUXNET study sites."
+
+soil_properties <- read_csv(
+  "../data/external/soilgrids/soilgrids_my_sites.csv",
+  show_col_types = FALSE
+)
+
+# Add ecosystem classification
+soil_properties <- soil_properties |>
+  left_join(
+    site_static |> select(site_id, igbp),
+    by = "site_id"
+  )
+
+# Prepare the table
+soil_properties |>
+  select(
+    site_id, igbp,
+    clay_pct, sand_pct, silt_pct, soc_g_kg
+  ) |>
+  rename(
+    "Site ID" = site_id,
+    "Ecosystem" = igbp,
+    "Clay (%)" = clay_pct,
+    "Sand (%)" = sand_pct,
+    "Silt (%)" = silt_pct,
+    "SOC (g/kg)" = soc_g_kg
+  ) |>
+  kable(digits = 1)
+```
+
+SoilGrids predictions were available for all five study sites (Table 13). Surface soil composition varied among ecosystems, with clay content ranging from 14.7% at the evergreen needleleaf forest CA-Ca1 to 27.9% at the grassland CH-Rtb. The cropland CZ-KrP exhibited the highest predicted sand content (45.4%), while CA-Ca1 had the highest silt content (51.1%).
+
+Predicted soil organic carbon concentrations also differed among sites. The wetland US-Elm exhibited the highest SOC concentration (137.6 g/kg), followed by the deciduous broadleaf forest JP-Api (99.5 g/kg). In contrast, the cropland CZ-KrP and evergreen needleleaf forest CA-Ca1 had the lowest predicted SOC concentrations, at 50.3 and 51.6 g/kg, respectively.
+
+
+```{r}
+#| label: fig-soil-texture
+#| fig-cap: "Predicted surface soil texture composition (0–5 cm) across the five FLUXNET study sites. Fractions represent SoilGrids estimates of clay, silt and sand."
+#| fig-width: 9
+#| fig-height: 5
+
+soil_texture <- soil_properties |>
+  select(site_id, clay_pct, silt_pct, sand_pct) |>
+  pivot_longer(
+    cols = c(clay_pct, silt_pct, sand_pct),
+    names_to = "fraction",
+    values_to = "percentage"
+  ) |>
+  mutate(
+    fraction = factor(
+      fraction,
+      levels = c("sand_pct", "silt_pct", "clay_pct"),
+      labels = c("Sand", "Silt", "Clay")
+    ),
+    site_id = factor(
+      site_id,
+      levels = c(
+        "JP-Api", "CA-Ca1", "CH-Rtb",
+        "CZ-KrP", "US-Elm"
+      )
+    )
+  )
+
+ggplot(
+  soil_texture,
+  aes(
+    x = site_id,
+    y = percentage,
+    fill = fraction
+  )
+) +
+  geom_col(
+    width = 0.7,
+    color = "white",
+    linewidth = 0.3
+  ) +
+  scale_fill_manual(
+    values = c(
+      "Sand" = "#E9C46A",
+      "Silt" = "#A8A29E",
+      "Clay" = "#9B7653"
+    )
+  ) +
+  labs(
+    x = "FLUXNET site",
+    y = "Soil texture fraction (%)",
+    fill = "Soil fraction"
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "bottom",
+    panel.grid.major.x = element_blank()
+  )
+```
+
+The relative contributions of clay, silt and sand differed across the study sites (Figure 13). The evergreen needleleaf forest and cropland sites had comparatively lower clay fractions, while the grassland and wetland sites exhibited higher clay contents. These differences provide a basis for exploring whether variation in soil composition is associated with ecosystem responses to soil water availability.
+
+
+### Soil texture and drought sensitivity
+
+**Research question:** Are differences in soil texture associated with differences in ecosystem productivity during relatively dry periods?
+
+To explore whether soil characteristics may be associated with ecosystem productivity under contrasting water availability, daily gross primary productivity (GPP) was compared between relatively dry and wet summer conditions. ERA5-Land volumetric soil water content at 7–28 cm depth was used to characterize water availability, while GPP was obtained from FLUXNET.
+
+The analysis was restricted to June–August, corresponding to the Northern Hemisphere summer. For each site, relatively dry and wet days were defined as observations in the lowest and highest quartiles of summer soil water content, respectively. Mean GPP was calculated for each moisture category, and the relative difference between dry and wet conditions was used as an exploratory indicator of productivity response.
+
+Because soil texture was available for only one location per ecosystem type, these comparisons were interpreted descriptively rather than as evidence of causal relationships between soil properties and drought sensitivity.
+
+
+
+```{r}
+#| label: soil-dry-wet-data
+#| include: false
+
+# Select summer days with valid soil moisture and GPP
+soil_summer <- site_daily |>
+  filter(
+    month %in% c(6, 7, 8),
+    !is.na(era5l_swvl2),
+    !is.na(GPP_NT_VUT_REF),
+    is.finite(era5l_swvl2),
+    is.finite(GPP_NT_VUT_REF)
+  ) |>
+  group_by(site_id) |>
+  mutate(
+    q25 = quantile(era5l_swvl2, 0.25),
+    q75 = quantile(era5l_swvl2, 0.75),
+    moisture_group = case_when(
+      era5l_swvl2 <= q25 ~ "Dry",
+      era5l_swvl2 >= q75 ~ "Wet",
+      TRUE ~ "Intermediate"
+    )
+  ) |>
+  ungroup()
+
+
+# Summarize productivity for dry and wet conditions
+soil_gpp_summary <- soil_summer |>
+  filter(moisture_group %in% c("Dry", "Wet")) |>
+  group_by(site_id, moisture_group) |>
+  summarise(
+    mean_gpp = mean(GPP_NT_VUT_REF),
+    n_days = n(),
+    .groups = "drop"
+  )
+
+# Prepare a site-level comparison
+soil_comparison <- soil_gpp_summary |>
+  pivot_wider(
+    names_from = moisture_group,
+    values_from = c(mean_gpp, n_days)
+  ) |>
+  mutate(
+    relative_change = if_else(
+      !is.na(mean_gpp_Wet) & mean_gpp_Wet > 0,
+      100 * (mean_gpp_Dry - mean_gpp_Wet) /
+        mean_gpp_Wet,
+      NA_real_
+    )
+  ) |>
+  left_join(
+    soil_properties,
+    by = "site_id"
+  )
+```
+
+
+
+```{r}
+#| label: tbl-soil-gpp
+#| tbl-cap: "Mean summer gross primary productivity under relatively dry and wet soil moisture conditions at the five FLUXNET study sites."
+
+soil_comparison |>
+  select(
+    site_id, igbp,
+    clay_pct, sand_pct,
+    n_days_Dry, n_days_Wet,
+    mean_gpp_Dry, mean_gpp_Wet,
+    relative_change
+  ) |>
+  rename(
+    "Site ID" = site_id,
+    "Ecosystem" = igbp,
+    "Clay (%)" = clay_pct,
+    "Sand (%)" = sand_pct,
+    "Dry days (n)" = n_days_Dry,
+    "Wet days (n)" = n_days_Wet,
+    "GPP dry" = mean_gpp_Dry,
+    "GPP wet" = mean_gpp_Wet,
+    "GPP difference (%)" = relative_change
+  ) |>
+  kable(digits = 2)
+```
+
+
+```{r}
+#| label: fig-soil-drought-gpp
+#| fig-cap: "Mean summer gross primary productivity during relatively dry and wet soil moisture conditions at five FLUXNET sites. Moisture categories represent the lowest and highest site-specific quartiles of ERA5-Land soil water content (7–28 cm). Lines connect the two conditions at each site."
+#| fig-width: 9
+#| fig-height: 5
+
+soil_plot <- soil_gpp_summary |>
+  left_join(
+    site_static |> select(site_id, igbp),
+    by = "site_id"
+  ) |>
+  mutate(
+    site_id = factor(
+      site_id,
+      levels = c(
+        "US-Elm", "CZ-KrP", "CH-Rtb",
+        "CA-Ca1", "JP-Api"
+      )
+    ),
+    moisture_group = factor(
+      moisture_group,
+      levels = c("Dry", "Wet")
+    )
+  )
+
+ggplot(
+  soil_plot,
+  aes(
+    x = mean_gpp,
+    y = site_id,
+    color = igbp
+  )
+) +
+  geom_line(
+    aes(group = site_id),
+    color = "grey65",
+    linewidth = 0.8
+  ) +
+  geom_point(
+    aes(shape = moisture_group),
+    size = 3.5
+  ) +
+  scale_color_manual(
+    values = eco_cols
+  ) +
+  scale_shape_manual(
+    values = c(
+      "Dry" = 16,
+      "Wet" = 17
+    )
+  ) +
+  labs(
+    x = "Mean daily GPP (g C/m²/day)",
+    y = "FLUXNET site",
+    color = "Ecosystem",
+    shape = "Soil moisture"
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "bottom",
+    panel.grid.major.y = element_blank()
+  )
+```
+
+Summer GPP differed between relatively dry and wet soil moisture conditions, with substantial variation among the five study sites (Figure 14; Table 14). The largest negative difference was observed at the cropland CZ-KrP, where mean GPP was 49.3% lower during relatively dry days than during wet days. The evergreen needleleaf forest CA-Ca1 exhibited a comparatively small reduction of 3.1%. Conversely, GPP was higher during relatively dry conditions at the deciduous broadleaf forest JP-Api (+18.9%), wetland US-Elm (+20.5%) and grassland CH-Rtb (+3.7%). These contrasting patterns suggest that the association between soil moisture and productivity varies among sites, without establishing a direct relationship with soil texture.
+
+These relationships require cautious interpretation. Although soil texture can influence water retention and water availability to plants, the present analysis cannot isolate its effects from those of other environmental drivers, including temperature, radiation, vegetation phenology and ecosystem management. Moreover, the surface soil properties derived from SoilGrids (0–5 cm) do not correspond directly to the depth represented by the ERA5-Land soil water variable (7–28 cm).
+
+The comparison is further limited by the small number of independent study sites, with only one site representing each ecosystem type. Consequently, differences in productivity between relatively dry and wet conditions should be considered site-specific associations rather than evidence that soil texture determines drought sensitivity. The SoilGrids values are spatial predictions and were not independently validated using field soil measurements at the towers.
+
+
+## PlantTraits: Vegetation functional characteristics
+
+Plant functional traits provide information about vegetation resource acquisition strategies and potential differences in ecosystem functioning. Specific leaf area (SLA) describes leaf area per unit of dry leaf mass, while mass-based leaf nitrogen content is associated with the nitrogen available for leaf physiological processes.
+
+Spatial predictions of SLA and leaf nitrogen content were obtained from PlantTraits, a global dataset of plant functional traits derived from biodiversity observations, vegetation surveys, trait measurements and Earth observation data [@lusk2026]. The predictions represent estimated community-weighted trait values at approximately 1 km spatial resolution rather than direct measurements at the FLUXNET towers.
+
+The analysis examined trait availability, prediction uncertainty and the relationship between predicted leaf functional traits and ecosystem gross primary productivity (GPP). All five selected FLUXNET sites were included.
+
+### Area of applicability and prediction uncertainty
+
+The availability of PlantTraits predictions was evaluated for the five study sites. For each trait, the corresponding coefficient of variation (CoV) and area of applicability (AoA) indicator were retained. CoV was used as an indicator of relative prediction uncertainty, while AoA was used to identify potential limitations associated with spatial extrapolation beyond the conditions represented in the model training data.
+
+```{r}
+#| label: tbl-planttraits-properties
+#| tbl-cap: "Predicted specific leaf area, mass-based leaf nitrogen content and associated uncertainty indicators at the five FLUXNET study sites."
+
+planttraits_table <- site_static |>
+  select(
+    site_id,
+    igbp,
+    SLA,
+    SLA_cov,
+    SLA_aoa,
+    leaf_N_mass,
+    leaf_N_mass_cov,
+    leaf_N_mass_aoa
+  )
+
+planttraits_table |>
+  rename(
+    "Site ID" = site_id,
+    "Ecosystem" = igbp,
+    "SLA (m²/kg)" = SLA,
+    "SLA CoV (-)" = SLA_cov,
+    "SLA AoA (code)" = SLA_aoa,
+    "Leaf N (mg/g)" = leaf_N_mass,
+    "Leaf N CoV (-)" = leaf_N_mass_cov,
+    "Leaf N AoA (code)" = leaf_N_mass_aoa
+  ) |>
+  knitr::kable(digits = 3)
+```
+
+Predictions were available for both traits at all five sites (@tbl-planttraits-properties). SLA ranged from 15.1 m² kg⁻¹ at the wetland US-Elm to 20.7 m² kg⁻¹ at the cropland CZ-KrP. Mass-based leaf nitrogen content followed a similar pattern, with the lowest predicted value at US-Elm (16.3 mg g⁻¹) and the highest at CZ-KrP (23.4 mg g⁻¹).
+
+Relative prediction uncertainty differed among sites and traits. For SLA, CoV values ranged from approximately 0.028 at CH-Rtb to 0.048 at US-Elm. For leaf nitrogen, the highest CoV was observed at US-Elm (0.102), whereas CZ-KrP had the lowest value (0.008). These values indicate differences in relative prediction uncertainty, although they do not directly quantify prediction accuracy at individual towers.
+
+All five sites had extracted AoA values of zero for both traits. These categorical values were retained in the analysis without assigning an applicability interpretation until their coding could be verified against the original dataset metadata. In addition, spatial predictions should not be interpreted as direct field measurements, and their uncertainty must be considered when comparing ecosystem characteristics.
+
+### Plant functional traits and productivity
+
+**Research question:** How do leaf nitrogen content and specific leaf area relate to maximum daily GPP?
+
+To investigate potential relationships between leaf functional traits and ecosystem productivity, predicted SLA and leaf nitrogen content were compared with daily GPP derived from FLUXNET observations. Maximum observed daily GPP was calculated independently for each site. Because absolute maximum values can be influenced by isolated high observations, the 95th percentile of daily GPP was also calculated as a complementary indicator of high productivity.
+
+Only finite, non-missing daily GPP observations were included. The number of valid daily observations and monitoring years was recorded for each site. No additional gap-filling was performed.
+
+```{r}
+#| label: tbl-planttraits-gpp
+#| tbl-cap: "Predicted functional traits and high daily gross primary productivity across five FLUXNET sites. Years indicate years containing valid daily GPP observations."
+
+planttraits_gpp <- site_daily |>
+  filter(
+    !is.na(GPP_NT_VUT_REF),
+    is.finite(GPP_NT_VUT_REF)
+  ) |>
+  group_by(site_id) |>
+  summarise(
+    n_days = n(),
+    n_years = n_distinct(year),
+    max_gpp = max(GPP_NT_VUT_REF),
+    p95_gpp = as.numeric(
+      quantile(GPP_NT_VUT_REF, 0.95)
+    ),
+    .groups = "drop"
+  ) |>
+  left_join(
+    site_static |>
+      select(
+        site_id,
+        igbp,
+        SLA,
+        leaf_N_mass
+      ),
+    by = "site_id"
+  )
+
+planttraits_gpp |>
+  select(
+    site_id,
+    igbp,
+    n_days,
+    n_years,
+    SLA,
+    leaf_N_mass,
+    max_gpp,
+    p95_gpp
+  ) |>
+  knitr::kable(
+    digits = 2,
+    col.names = c(
+      "Site ID",
+      "Ecosystem",
+      "Days (n)",
+      "Years (n)",
+      "SLA (m²/kg)",
+      "Leaf N (mg/g)",
+      "Max. GPP (g C/m²/day)",
+      "95th GPP (g C/m²/day)"
+    )
+  )
+```
+
+To visualize these relationships, site-level trait predictions were plotted against maximum daily GPP and the 95th percentile. Each point represents one FLUXNET tower, with colors distinguishing ecosystem types. No regression lines were fitted because the analysis included only five independent sites, each representing a different ecosystem type.
+
+
+```{r}
+#| label: fig-planttraits-gpp
+#| fig-cap: "Relationships between predicted plant functional traits and high daily GPP at five FLUXNET sites. Columns represent (a) specific leaf area and (b) leaf nitrogen content. Rows show the maximum daily GPP and its 95th percentile. Each point represents one site."
+#| fig-width: 11
+#| fig-height: 7
+
+plot_traits <- planttraits_gpp |>
+  select(
+    site_id, igbp,
+    SLA, leaf_N_mass,
+    max_gpp, p95_gpp
+  ) |>
+  tidyr::pivot_longer(
+    cols = c(SLA, leaf_N_mass),
+    names_to = "trait",
+    values_to = "trait_value"
+  ) |>
+  tidyr::pivot_longer(
+    cols = c(max_gpp, p95_gpp),
+    names_to = "metric",
+    values_to = "gpp"
+  ) |>
+  mutate(
+    trait = factor(
+      trait,
+      levels = c("SLA", "leaf_N_mass"),
+      labels = c(
+        "a  Specific leaf area (m²/kg)",
+        "b  Leaf nitrogen (mg/g)"
+      )
+    ),
+    metric = factor(
+      metric,
+      levels = c("max_gpp", "p95_gpp"),
+      labels = c(
+        "Maximum daily GPP",
+        "95th percentile GPP"
+      )
+    )
+  )
+
+ggplot(
+  plot_traits,
+  aes(
+    x = trait_value,
+    y = gpp,
+    color = igbp
+  )
+) +
+  geom_point(size = 3) +
+  ggrepel::geom_text_repel(
+    aes(label = site_id),
+    size = 3,
+    max.overlaps = Inf,
+    show.legend = FALSE
+  ) +
+  facet_grid(
+    metric ~ trait,
+    scales = "free_x"
+  ) +
+  scale_color_manual(values = eco_cols) +
+  scale_x_continuous(
+    expand = expansion(mult = 0.15)
+  ) +
+  scale_y_continuous(
+    limits = c(0, 30),
+    breaks = seq(0, 30, 5)
+  ) +
+  labs(
+    x = "Predicted trait value",
+    y = "Daily GPP (g C/m²/day)"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    legend.position = "none",
+    panel.grid.minor = element_blank(),
+    strip.text = element_text(face = "bold"),
+    panel.spacing = grid::unit(1, "lines")
+  )
+```
+
+Maximum daily GPP and its 95th percentile varied considerably among the five FLUXNET study sites (@tbl-planttraits-gpp; @fig-planttraits-gpp). The cropland CZ-KrP exhibited the highest maximum daily GPP (27.0 g C m⁻² day⁻¹), together with the highest predicted SLA (20.7 m² kg⁻¹) and leaf nitrogen content (23.4 mg g⁻¹). However, this pattern was not consistent across the other ecosystem types.
+
+The evergreen needleleaf forest CA-Ca1 exhibited a maximum daily GPP of 25.9 g C m⁻² day⁻¹ despite having lower predicted SLA and leaf nitrogen content than several other sites. Its 95th percentile GPP (15.5 g C m⁻² day⁻¹) was the highest among the five towers, indicating relatively high productivity across the upper range of its daily observations.
+
+The wetland US-Elm exhibited the lowest predicted SLA and leaf nitrogen content, but its maximum observed GPP (23.4 g C m⁻² day⁻¹) was substantially higher than its 95th percentile (2.45 g C m⁻² day⁻¹). This difference suggests that the absolute maximum was unusually high relative to the overall distribution of daily observations at this site. Consequently, both maximum GPP and its 95th percentile were considered when exploring relationships with plant functional traits.
+
+Overall, no consistent relationship between either predicted leaf functional trait and high daily GPP was apparent across the five study sites (@fig-planttraits-gpp). Although leaf functional traits are associated with plant resource acquisition strategies, ecosystem-level productivity is also influenced by canopy structure, vegetation cover, radiation, temperature, water availability and ecosystem management.
+
+Furthermore, PlantTraits values represent spatially predicted community-level characteristics, whereas FLUXNET GPP integrates carbon uptake across the ecosystem footprint surrounding each tower. Differences in spatial representation, prediction uncertainty and monitoring duration may therefore contribute to the observed variability.
+
+Therefore, although variation in predicted leaf traits coincided with differences in high daily GPP among the five sites, no consistent cross-site relationship was apparent. The limited number of independent sites and differences in ecosystem characteristics prevent robust inference about trait–productivity relationships.
+
+
+## deadtrees.earth: Tree cover and mortality
+
+The deadtrees.earth platform provides spatial information on tree cover and standing deadwood derived from remote sensing and machine-learning approaches [@mosig2026]. These data can support investigations of vegetation structure and forest disturbance, although standing deadwood does not directly establish the timing or cause of tree mortality.
+
+For this analysis, annual estimates of tree cover and standing deadwood were examined for the five FLUXNET study sites. The available satellite products cover Europe from 2017 to 2025 at a spatial resolution of 10 m. Data were extracted from a 2 × 2 km area (400 ha) surrounding each tower. The spatial estimates were evaluated separately from FLUXNET carbon flux measurements because their geographical coverage and observation periods differ.
+
+### Spatial coverage and standing deadwood
+
+Annual tree-cover and standing-deadwood estimates were available for two European study sites: CH-Rtb in Switzerland and CZ-KrP in Czechia. Both sites had data covering 2017–2025. Corresponding satellite raster products were not available for the other three sites in the downloaded dataset.
+
+In the original data-processing script, forest area was defined as the area of pixels with estimated tree cover exceeding 20%. The area classified as mortality was calculated from pixels simultaneously exceeding 20% tree cover and 30% standing deadwood cover. These thresholds represent operational classification criteria rather than direct measurements of annual tree mortality. Therefore, the present analysis focuses on annual estimates of tree cover and standing deadwood without interpreting the threshold-based area estimates as annual mortality rates.
+
+```{r}
+#| label: tbl-deadtrees-coverage
+#| tbl-cap: "Availability and change in estimated tree cover and standing deadwood at the five FLUXNET sites. Changes are calculated as 2025 minus 2017, in percentage points."
+
+deadtrees <- readr::read_csv(
+  "../data/external/deadtrees/deadtrees_my_sites.csv",
+  show_col_types = FALSE
+)
+
+deadtrees_summary <- deadtrees |>
+  group_by(site_id) |>
+  summarise(
+    years = n_distinct(year),
+    tree_2017 = tree_cover_pct[year == 2017][1],
+    tree_2025 = tree_cover_pct[year == 2025][1],
+    dead_2017 = deadwood_pct[year == 2017][1],
+    dead_2025 = deadwood_pct[year == 2025][1],
+    .groups = "drop"
+  ) |>
+  mutate(
+    tree_change = tree_2025 - tree_2017,
+    dead_change = dead_2025 - dead_2017
+  )
+
+deadtrees_summary <- site_static |>
+  select(site_id, igbp) |>
+  left_join(deadtrees_summary, by = "site_id")
+
+deadtrees_summary |>
+  select(
+    site_id, igbp, years,
+    tree_2017, tree_2025, tree_change,
+    dead_2017, dead_2025, dead_change
+  ) |>
+  knitr::kable(
+    digits = 2,
+    col.names = c(
+      "Site",
+      "Ecosystem",
+      "Years (n)",
+      "Tree cover 2017 (%)",
+      "Tree cover 2025 (%)",
+      "Change (pp)",
+      "Deadwood 2017 (%)",
+      "Deadwood 2025 (%)",
+      "Change (pp)"
+    )
+  )
+```
+
+Tree cover remained relatively stable at CH-Rtb, increasing from 25.4% in 2017 to 25.6% in 2025 (Table 17). Over the same period, estimated standing deadwood cover changed from 2.43% to 2.37%. In contrast, CZ-KrP exhibited a decline in estimated tree cover from 31.4% to 21.3%, equivalent to a decrease of 10.1 percentage points. Standing deadwood cover increased from 2.64% to 4.02% between the first and last observations.
+
+To examine interannual variability, annual tree-cover and standing-deadwood estimates were visualized as time series for both sites.
+
+```{r}
+#| label: fig-deadtrees-trends
+#| fig-cap: "Annual estimates of tree cover (a) and standing deadwood cover (b) at the two European FLUXNET sites, 2017–2025. The panels use separate vertical scales to show variation in each variable. Values represent spatial estimates for the sampled landscape rather than measurements of mortality at the flux towers."
+#| fig-width: 10
+#| fig-height: 6
+
+deadtrees_plot <- deadtrees |>
+  select(
+    site_id,
+    year,
+    tree_cover_pct,
+    deadwood_pct
+  ) |>
+  tidyr::pivot_longer(
+    cols = c(tree_cover_pct, deadwood_pct),
+    names_to = "variable",
+    values_to = "value"
+  ) |>
+  mutate(
+    variable = factor(
+      variable,
+      levels = c(
+        "tree_cover_pct",
+        "deadwood_pct"
+      ),
+      labels = c(
+        "a  Tree cover (%)",
+        "b  Standing deadwood cover (%)"
+      )
+    )
+  ) |>
+  left_join(
+    site_static |>
+      select(site_id, igbp),
+    by = "site_id"
+  )
+
+ggplot(
+  deadtrees_plot,
+  aes(
+    x = year,
+    y = value,
+    color = igbp,
+    group = site_id
+  )
+) +
+  geom_line(linewidth = 0.8) +
+  geom_point(size = 2) +
+  facet_grid(
+    variable ~ site_id,
+    scales = "free_y"
+  ) +
+  scale_color_manual(values = eco_cols) +
+  scale_x_continuous(
+    breaks = 2017:2025
+  ) +
+  labs(
+    x = "Year",
+    y = "Estimated cover (%)"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    legend.position = "none",
+    panel.grid.minor = element_blank(),
+    strip.text = element_text(face = "bold"),
+    axis.text.x = element_text(
+      angle = 45,
+      hjust = 1
+    )
+  )
+```
+
+The annual series illustrate contrasting temporal patterns between the two European sites (Figure 16). At CH-Rtb, tree cover fluctuated within a relatively narrow range, whereas CZ-KrP exhibited a more pronounced decline, particularly after 2019. Standing deadwood cover also varied more substantially at CZ-KrP, reaching its highest estimated value in 2019 (5.37%). At CH-Rtb, standing deadwood cover remained comparatively stable, fluctuating between approximately 2.4% and 3.1%.
+
+These patterns describe changes in remotely sensed tree cover and standing deadwood within the sampled landscapes. They should not be interpreted as direct measurements of annual tree mortality or changes in ecosystem carbon uptake.
+
+### Applicability to the selected ecosystems
+
+The applicability of deadtrees.earth to the five FLUXNET sites was limited by geographical coverage and ecosystem representation. Although the two sites with available data are classified as grassland (CH-Rtb) and cropland (CZ-KrP), the surrounding landscapes contain areas of tree cover. Therefore, the spatial estimates describe landscape characteristics rather than exclusively the vegetation measured by the eddy covariance towers.
+
+The evergreen needleleaf forest CA-Ca1 in Canada and deciduous broadleaf forest JP-Api in Japan would be particularly relevant for investigating relationships between tree mortality and forest carbon exchange. However, suitable annual satellite products were not available for these sites in the downloaded dataset. Missing observations were retained as missing rather than interpreted as zero tree cover or mortality.
+
+An additional limitation concerns temporal compatibility. The satellite series extends to 2025, whereas the available FLUXNET observations end in 2022 at CH-Rtb and 2023 at CZ-KrP. Consequently, estimates from later years cannot be directly compared with observed carbon fluxes for those sites.
+
+Furthermore, the 2 × 2 km extraction area represents a fixed landscape surrounding each tower rather than its actual eddy covariance footprint, which varies with meteorological conditions. Tree-cover changes within this landscape may result from multiple processes, including vegetation removal, land management, disturbance, regeneration and changes in classification. Standing deadwood may also persist for several years following tree death. Consequently, the available annual estimates cannot independently establish the timing or causes of mortality.
+
+Overall, deadtrees.earth provides useful complementary information on landscape vegetation structure and standing deadwood at the European study sites. However, its limited geographical coverage, differences between remote-sensing extraction areas and eddy covariance footprints, and the absence of suitable data for the selected forest ecosystems prevent robust conclusions about relationships between tree mortality and ecosystem carbon exchange.
+
+
+## iNaturalist: Biodiversity and phenology
+
+Biodiversity observations from iNaturalist provide complementary information about the organisms recorded near ecosystem monitoring stations. Unlike standardized ecological surveys, iNaturalist relies on observations contributed by members of the public. Consequently, the spatial and temporal distribution of records may reflect both ecological patterns and differences in observer activity.
+
+Research-grade observations were obtained using the iNaturalist API within a 5 km radius of each of the five FLUXNET towers. All available taxonomic groups were initially included, while records assigned to Plantae were subsequently selected for the seasonal analysis. The downloaded observations were restricted to the monitoring years of the corresponding FLUXNET sites. Missing observations were not interpreted as species absences, and no additional gap-filling was performed.
+
+### Species observations and sampling effort
+
+The availability of biodiversity records was assessed by calculating the number of research-grade observations, recorded species-level taxa and plant observations at each site. Temporal overlap with FLUXNET was examined separately to distinguish total biodiversity records from observations potentially suitable for comparison with ecosystem productivity.
+
+```{r}
+#| label: tbl-inaturalist-availability
+#| tbl-cap: "Availability of research-grade iNaturalist observations within 5 km of the five FLUXNET towers."
+
+library(readr)
+library(dplyr)
+library(tidyr)
+library(lubridate)
+library(ggplot2)
+library(knitr)
+
+# Read files relative to the reports directory
+inat_files <- list.files(
+  "../data/external/inaturalist",
+  pattern = "_inat.csv$",
+  full.names = TRUE
+)
+
+inat <- bind_rows(
+  lapply(inat_files, function(file) {
+    read_csv(file, show_col_types = FALSE)
+  })
+)
+
+# Add monitoring-period information
+inat_all <- inat |>
+  mutate(
+    date = as.Date(observed_on),
+    year = year(date),
+    month = month(date)
+  ) |>
+  left_join(
+    site_static |>
+      select(site_id, igbp, first_year, last_year),
+    by = "site_id"
+  ) |>
+  mutate(
+    in_period = !is.na(year) &
+      year >= first_year &
+      year <= last_year
+  )
+
+# Summarise observations at each tower
+inat_summary <- inat_all |>
+  group_by(site_id, igbp) |>
+  summarise(
+    total_records = n(),
+    species_taxa = n_distinct(
+      taxon[rank %in% "species" & !is.na(taxon)]
+    ),
+    plant_records = sum(
+      iconic_taxon == "Plantae",
+      na.rm = TRUE
+    ),
+    overlapping_records = sum(in_period),
+    overlapping_plants = sum(
+      in_period & iconic_taxon == "Plantae",
+      na.rm = TRUE
+    ),
+    .groups = "drop"
+  )
+
+inat_summary |>
+  rename(
+    "Site ID" = site_id,
+    "Ecosystem" = igbp,
+    "Total records" = total_records,
+    "Species-level taxa" = species_taxa,
+    "Plant records" = plant_records,
+    "Overlapping records" = overlapping_records,
+    "Overlapping plants" = overlapping_plants
+  ) |>
+  kable()
+```
+
+Research-grade iNaturalist observations were available for all five study sites, although record numbers differed substantially among locations. A total of 1,399 observations were retrieved, ranging from 36 records at CZ-KrP to 719 at US-Elm.
+
+After restricting observations to the corresponding FLUXNET monitoring years, 728 records remained across four sites, including 392 plant observations. No temporally overlapping observations were available at CA-Ca1. US-Elm accounted for the largest number of overlapping records, followed by CH-Rtb.
+
+The differences in observation numbers reflect unequal sampling effort and potentially differences in observer accessibility and activity. Therefore, the recorded number of species-level taxa should not be interpreted as a standardized estimate of local species richness.
+
+```{r}
+#| label: fig-inaturalist-effort
+#| fig-cap: "Research-grade iNaturalist observations within 5 km of each FLUXNET tower. Bars distinguish records inside and outside the corresponding FLUXNET monitoring years. The absence of overlapping records does not indicate ecological absence."
+#| fig-width: 9
+#| fig-height: 5
+
+inat_effort <- inat_all |>
+  mutate(
+    period = if_else(
+      in_period,
+      "Within FLUXNET years",
+      "Outside FLUXNET years"
+    )
+  ) |>
+  count(site_id, period)
+
+ggplot(
+  inat_effort,
+  aes(x = site_id, y = n, fill = period)
+) +
+  geom_col(width = 0.7) +
+  coord_flip() +
+  scale_fill_manual(
+    values = c(
+      "Within FLUXNET years" = "#528B80",
+      "Outside FLUXNET years" = "#B8B8B8"
+    )
+  ) +
+  labs(
+    x = "FLUXNET site",
+    y = "iNaturalist observations (n)",
+    fill = "Temporal coverage"
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "bottom",
+    panel.grid.major.y = element_blank()
+  )
+```
+
+### Seasonal plant observations and productivity
+
+**Research question:** Does the seasonal timing of plant observations coincide with changes in gross primary productivity (GPP)?
+
+To explore potential seasonal correspondence between biodiversity observations and ecosystem productivity, plant observations were grouped by calendar month and compared with FLUXNET GPP. The comparison was restricted to year-month combinations for which both iNaturalist observations and valid daily GPP measurements were available.
+
+The main exploratory analysis focused on US-Elm and CH-Rtb, which had at least 20 plant observations within their FLUXNET monitoring periods. The remaining sites had insufficient plant observations for a useful seasonal visualization.
+
+Monthly plant observation numbers were treated as measures of recorded observation activity rather than direct measurements of plant phenology. Monthly GPP was calculated from valid daily FLUXNET observations. No gap-filling was performed.
+
+```{r}
+#| label: tbl-inaturalist-monthly-coverage
+#| tbl-cap: "Availability of temporally matched iNaturalist and FLUXNET GPP observations for the seasonal comparison."
+
+# Daily FLUXNET data
+flux_monthly <- site_daily |>
+  mutate(
+    date = as.Date(date),
+    year = year(date),
+    month = month(date)
+  ) |>
+  filter(
+    !is.na(GPP_NT_VUT_REF),
+    is.finite(GPP_NT_VUT_REF)
+  ) |>
+  group_by(site_id, year, month) |>
+  summarise(
+    mean_gpp = mean(GPP_NT_VUT_REF),
+    gpp_days = n(),
+    .groups = "drop"
+  )
+
+# Restrict iNaturalist observations to FLUXNET years
+inat_overlap <- inat_all |>
+  filter(in_period)
+
+# All iNaturalist records by year and month
+inat_monthly <- inat_overlap |>
+  group_by(site_id, year, month) |>
+  summarise(
+    observations = n(),
+    plant_observations = sum(
+      iconic_taxon == "Plantae",
+      na.rm = TRUE
+    ),
+    .groups = "drop"
+  )
+
+# Match year-month combinations across datasets
+matched_months <- inat_monthly |>
+  filter(plant_observations > 0) |>
+  inner_join(
+    flux_monthly,
+    by = c("site_id", "year", "month")
+  )
+
+matched_months |>
+  group_by(site_id) |>
+  summarise(
+    matched_year_months = n(),
+    matched_plant_records = sum(plant_observations),
+    years = n_distinct(year),
+    .groups = "drop"
+  ) |>
+  rename(
+    "Site ID" = site_id,
+    "Matched year-months (n)" = matched_year_months,
+    "Plant observations (n)" = matched_plant_records,
+    "Years represented (n)" = years
+  ) |>
+  kable()
+```
+
+The temporal matching procedure identifies calendar months in which the two data sources can be compared. However, the number of iNaturalist observations remains dependent on recording effort, and a temporal match does not imply that observations were collected through standardized ecological sampling.
+
+```{r}
+#| label: fig-inaturalist-plant-seasonality
+#| fig-cap: "Monthly distribution of research-grade plant observations near US-Elm and CH-Rtb during year-months with available FLUXNET GPP. Counts represent recorded observations pooled across matching years, not standardized vegetation abundance or flowering intensity."
+#| fig-width: 9
+#| fig-height: 5
+
+season_sites <- c("US-Elm", "CH-Rtb")
+
+plant_months <- matched_months |>
+  filter(site_id %in% season_sites) |>
+  group_by(site_id, month) |>
+  summarise(
+    plant_observations = sum(plant_observations),
+    .groups = "drop"
+  )
+
+ggplot(
+  plant_months,
+  aes(
+    x = month,
+    y = plant_observations,
+    fill = site_id
+  )
+) +
+  geom_col(width = 0.75) +
+  facet_wrap(~site_id, ncol = 1, scales = "free_y") +
+  scale_x_continuous(
+    breaks = 1:12,
+    labels = month.abb,
+    limits = c(0.5, 12.5)
+  ) +
+  scale_fill_manual(
+    values = c(
+      "US-Elm" = "#90C9E8",
+      "CH-Rtb" = "#A4C981"
+    )
+  ) +
+  labs(
+    x = "Calendar month",
+    y = "Plant observations (n)"
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "none",
+    panel.grid.minor = element_blank()
+  )
+```
+
+To examine the corresponding productivity patterns, mean monthly GPP was summarized across the matched year-month combinations. The analysis was exploratory because the amount of biodiversity information differed among sites and months.
+
+```{r}
+#| label: fig-inaturalist-gpp-seasonality
+#| fig-cap: "Mean monthly gross primary productivity (GPP) at US-Elm and CH-Rtb, calculated from year-months with at least one corresponding iNaturalist plant observation and valid FLUXNET GPP data. Points represent monthly averages pooled across available monitoring years rather than a continuous annual time series. Differences in temporal coverage and sample size limit interpretation."
+#| fig-width: 9
+#| fig-height: 5
+
+gpp_season <- matched_months |>
+  filter(site_id %in% season_sites) |>
+  group_by(site_id, month) |>
+  summarise(
+    mean_gpp = mean(mean_gpp),
+    n_year_months = n(),
+    .groups = "drop"
+  )
+
+ggplot(
+  gpp_season,
+  aes(
+    x = month,
+    y = mean_gpp,
+    color = site_id
+  )
+) +
+  geom_line(
+    linewidth = 0.8,
+    na.rm = TRUE
+  ) +
+  geom_point(size = 2.5) +
+  facet_wrap(~site_id, ncol = 1, scales = "free_y") +
+  scale_x_continuous(
+    breaks = 1:12,
+    labels = month.abb,
+    limits = c(0.5, 12.5)
+  ) +
+  scale_color_manual(
+    values = c(
+      "US-Elm" = "#90C9E8",
+      "CH-Rtb" = "#A4C981"
+    )
+  ) +
+  labs(
+    x = "Calendar month",
+    y = "Mean daily GPP (g C/m²/day)"
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "none",
+    panel.grid.minor = element_blank()
+  )
+```
+
+The comparison of seasonal plant observations and ecosystem productivity should be interpreted cautiously. Although monthly patterns may suggest potential temporal correspondence, iNaturalist observations depend on citizen-science participation and do not provide standardized measurements of plant abundance, flowering phenology or vegetation activity.
+
+Furthermore, monthly productivity estimates and biodiversity observations may represent different locations within the 5 km search radius. Differences in vegetation composition, land cover and observation effort can therefore influence the apparent relationships.
+
+Overall, iNaturalist provides useful complementary information about recorded biodiversity near the FLUXNET towers. However, the uneven number of records and limited temporal overlap restrict its application for quantitative comparisons of plant phenology and ecosystem productivity across all five study sites.
+
+
+## MODIS: Vegetation greenness and productivity
+
+### Validation of calculated NDVI and EVI
+
+### Seasonal dynamics of greenness and GPP
+
+### Greenness-productivity relationships
+
+**Research question:** Which vegetation index follows GPP most closely at each site, and when does this relationship become weaker?
+
+# Discussion
+
+An important limitation of this analysis is that the FLUXNET records are uneven in temporal coverage and contain measurement gaps that required gap-filling in the original products. In addition, the five sites represent contrasting ecosystem types and different monitoring periods, so differences among sites cannot be attributed solely to ecosystem type. They may also reflect climatic differences, site-specific management, local environmental conditions and differences in the years represented in each record.
+
+
+## Soil water and temperature limitations
+
+The contrasting relationships between soil water content, air temperature and productivity suggest that environmental controls on carbon uptake differ among the five study sites. The cropland CZ-KrP exhibited the strongest positive association between soil water content and GPP, together with an apparent reduction in productivity at higher air temperatures. Considering that this site also exhibited the lowest long-term annual precipitation, these patterns may indicate greater sensitivity to water availability and heat stress. Nevertheless, agricultural management, crop phenology and harvesting may also influence the observed relationships.
+
+The two forest sites exhibited relatively weak or negative associations between summer soil water content and GPP, while productivity generally increased with air temperature. These patterns may reflect the influence of seasonal vegetation development, access to water in deeper soil layers and interactions with other environmental drivers, such as solar radiation and atmospheric water demand.
+
+At the wetland US-Elm, both soil moisture and air temperature exhibited comparatively weak relationships with productivity. The long-hydroperiod characteristics of this ecosystem suggest that hydrological conditions, including inundation duration and water-table dynamics, may be relevant additional controls that are not adequately represented by volumetric soil water content alone. Furthermore, the June–August analysis period may represent different ecological conditions at the subtropical wetland than at the four temperate and cool-temperate sites.
+
+These interpretations remain exploratory because the analyses are based on bivariate relationships and a single representative site per ecosystem type. Consequently, differences among sites cannot be attributed exclusively to ecosystem characteristics.
+
+## Climatic variability and extreme events
+
+The comparison of daily and annual climatic relationships revealed differences in the temporal scales at which environmental conditions were associated with ecosystem productivity. While daily GPP generally increased with air temperature at several study sites, annual temperature anomalies were not consistently associated with annual productivity. This suggests that short-term temperature–productivity relationships do not necessarily translate into equivalent interannual responses.
+
+The grassland site CH-Rtb exhibited the strongest associations between annual climatic variability and productivity. Its positive temperature–GPP relationship may reflect favorable thermal conditions for vegetation development and a potentially longer growing season during warmer years. The negative association with annual precipitation may reflect interactions with solar radiation, cloud cover or temperature rather than a direct negative effect of water availability.
+
+At the cropland site CZ-KrP, the positive relationship between summer soil water content and daily GPP identified in the ERA5-Land analysis was not accompanied by a strong association between annual precipitation anomalies and annual productivity. This distinction highlights the importance of the timing and seasonal distribution of precipitation, as well as potential influences of agricultural management and crop phenology.
+
+The wetland US-Elm exhibited comparatively large relative interannual productivity deviations despite weak associations with temperature and precipitation. This suggests that additional environmental factors, particularly hydrological conditions and inundation dynamics, may be important for understanding productivity variability at this site.
+
+These relationships should be interpreted cautiously because the analyses are based on relatively short and unequal monitoring periods, and each ecosystem type is represented by only one site.
+
+## Soil and plant functional characteristics
+
+## Disturbance, biodiversity and phenology
+
+## Satellite greenness and ecosystem productivity
+
+## Differences among study sites
+
+## Data gaps and methodological limitations
+The comparison with WorldClim climate normals identified potential data quality concerns that were not apparent from data completeness alone. At CA-Ca1, annual air temperature anomalies reached unusually high values, particularly between 2007 and 2009. At JP-Api, annual precipitation was consistently several thousand millimetres higher than the corresponding WorldClim reference.
+
+These discrepancies may reflect issues associated with the original records, data processing, or differences between station-scale observations and gridded climatological estimates. Their origin could not be established from the present analysis. Consequently, the corresponding climatic relationships should be interpreted with particular caution. No additional gap-filling or correction of the original observations was performed during this stage of the analysis.
+
+### FLUXNET measurement coverage and gap-filling
+
+### Spatial and temporal scale mismatches
+
+### Dataset applicability and uncertainty
+
+### Limitations of cross-site comparisons
+
+# Conclusions
+
+# Acknowledgements {.unnumbered}
+
+FLUXNET data products were produced and harmonized by eddy covariance regional networks and data processing centers, including AmeriFlux, ChinaFlux, European Fluxes Database, ICOS, JapanFlux, KoFlux, OzFlux, SAEON, and TERN. These products also include a modified version of ERA5 hourly data provided by the Copernicus Climate Change Service.
+
+Contains modified Copernicus Climate Change Service information (2026).
+
+# References {.unnumbered}
+
+::: {#refs}
+:::
