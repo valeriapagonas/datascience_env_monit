@@ -2623,7 +2623,9 @@ matched_months |>
   kable()
 ```
 
-The temporal matching procedure identifies calendar months in which the two data sources can be compared. However, the number of iNaturalist observations remains dependent on recording effort, and a temporal match does not imply that observations were collected through standardized ecological sampling.
+The temporal matching procedure identified calendar months in which iNaturalist plant observations and valid FLUXNET GPP measurements were both available. A total of 306 plant observation records were retained across four sites. Most were concentrated at US-Elm (221 observations across 49 matched year-month combinations) and CH-Rtb (81 observations across 14 combinations). In contrast, CZ-KrP and JP-Api each contributed only two observations. Consequently, the seasonal visualizations focused on US-Elm and CH-Rtb, which provided greater temporal coverage.
+
+However, the number and seasonal distribution of iNaturalist observations depend on observer activity and sampling effort. Therefore, temporal overlap with FLUXNET measurements does not imply standardized ecological sampling, and any apparent correspondence between plant observations and ecosystem productivity should be interpreted as exploratory rather than evidence of a direct ecological relationship.
 
 ```{r}
 #| label: fig-inaturalist-plant-seasonality
