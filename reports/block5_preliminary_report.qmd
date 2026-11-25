@@ -1,5 +1,5 @@
 ---
-title: "Environmental drivers of ecosystem productivity and carbon fluxes across five FLUXNET sites"
+title: "Preliminary Report: Environmental Drivers of Ecosystem Productivity and Carbon Fluxes Across Five FLUXNET Sites"
 subtitle: "Environmental Monitoring and Data Analysis – Block 5"
 author: "Valeria Pagonas"
 date: today
@@ -19,6 +19,8 @@ execute:
   warning: false
   message: false
 ---
+
+*GitHub fork:* [valeriapagonas/datascience_env_monit](https://github.com/valeriapagonas/datascience_env_monit)
 
 # Introduction
 Terrestrial ecosystems play an important role in regulating exchanges of carbon, water and energy between the land surface and the atmosphere. Ecosystem productivity and carbon fluxes are influenced by environmental conditions, including temperature, water availability, soil properties, vegetation characteristics and extreme climatic events.
