@@ -1,0 +1,876 @@
+---
+title: "Block 5: Vegetation Greenness and Ecosystem Productivity Across Five FLUXNET Sites"
+subtitle: "Environmental Monitoring and Data Analysis"
+author: "Valeria Pagonas"
+date: today
+bibliography: references.bib
+link-citations: true
+
+format:
+  html:
+    toc: true
+    toc-location: right
+    number-sections: true
+    code-fold: true
+    code-summary: "Show the code"
+    embed-resources: true
+    css: styles.css
+
+execute:
+  echo: true
+  warning: false
+  message: false
+---
+
+*GitHub fork:* [valeriapagonas/datascience_env_monit](https://github.com/valeriapagonas/datascience_env_monit)
+
+# Question and hypothesis
+
+**Research question:** How does the relationship between MODIS vegetation greenness (NDVI and EVI) and FLUXNET gross primary productivity (GPP) vary across five ecosystems, and can ERA5-Land soil moisture help explain differences in this relationship?
+
+**Hypothesis:** NDVI and EVI are expected to be positively associated with GPP because vegetation greenness reflects canopy development and photosynthetically active vegetation, although differences in canopy structure and phenology may influence the strength of these relationships among sites. Under conditions of limited soil water availability, GPP is expected to decrease even when vegetation remains green, as water stress can induce stomatal closure and reduce photosynthetic carbon uptake before visible changes in vegetation greenness occur.
+
+The five FLUXNET towers represent contrasting ecosystem types, allowing an exploratory comparison of how vegetation structure, phenology and environmental conditions influence greenness–productivity relationships. However, because each ecosystem type is represented by a single tower, ecosystem-level effects cannot be distinguished from site-specific conditions. This question is particularly relevant for understanding the potential and limitations of satellite vegetation indices as indicators of ecosystem carbon uptake under varying environmental conditions.
+
+# Data
+
+The analysis combined daily carbon-flux observations from five FLUXNET monitoring sites with two complementary environmental datasets: MODIS MOD13Q1 vegetation indices and ERA5-Land soil moisture. The study sites included an evergreen needleleaf forest (CA-Ca1), grassland (CH-Rtb), cropland (CZ-KrP), deciduous broadleaf forest (JP-Api), and wetland (US-Elm). Site-specific FLUXNET datasets were cited individually to acknowledge the original data providers [@black2025; @hirschi2026; @acosta2026; @yasuda2026; @starr2026], alongside the general FLUXNET processing methodology [@pastorello2020]. MODIS vegetation indices and ERA5-Land soil moisture were obtained from their respective data services [@didan2021; @ornl2018; @munoz2021]. Dataset provenance, processing characteristics, and access dates are summarized in @tbl-data-provenance.
+
+::: {.small-table}
+```{r}
+#| label: tbl-data-provenance
+#| tbl-cap: "Provenance of the three datasets used to examine vegetation greenness, ecosystem productivity and soil moisture across five FLUXNET sites."
+
+library(tibble)
+library(knitr)
+
+provenance <- tibble(
+  Dataset = c(
+    "FLUXNET",
+    "MODIS MOD13Q1 V061",
+    "ERA5-Land"
+  ),
+
+  `Variables used` = c(
+    "GPP_NT_VUT_REF",
+    "NDVI, EVI, pixel reliability",
+    "Volumetric soil water content (swvl2)"
+  ),
+
+  `Spatial resolution` = c(
+    "Variable tower flux footprint",
+    "Nominal 250 m; 9 x 9 pixels",
+    "Approximately 9 km"
+  ),
+
+  `Temporal resolution and period` = c(
+    "Daily; site-specific tower years",
+    "16-day composites; site-specific periods",
+    "Hourly source; aggregated to daily"
+  ),
+
+  `Downloaded on` = c(
+    "2026-11-22",
+    "2026-11-22",
+    "2026-11-20"
+  ),
+
+  `Script and changes` = c(
+    "read_flux_data.R / 09_merge.R; daily GPP",
+    "08_modis_ndvi_evi.py; QA 0-1; spatial means",
+    "01_era5land.R / 09_merge.R; daily soil moisture"
+  ),
+
+  Citation = c(
+    "Pastorello et al. (2020); tower citations",
+    "Didan (2021); ORNL DAAC (2018)",
+    "Munoz-Sabater et al. (2021)"
+  )
+)
+
+knitr::kable(provenance)
+```
+:::
+
+## Data preparation and temporal matching
+
+To examine the relationship between vegetation greenness, ecosystem productivity and soil water availability, MODIS vegetation indices were combined with FLUXNET GPP and ERA5-Land soil moisture.
+
+MODIS observations represent approximately 16-day composites. Daily FLUXNET and ERA5-Land observations were therefore aggregated over corresponding 16-day periods. Missing observations were retained as missing, without interpolation or gap-filling.
+```{r}
+#| label: tbl-modis-data-coverage
+#| tbl-cap: "Temporal coverage of MODIS vegetation indices, FLUXNET GPP and ERA5-Land soil moisture across five sites. Complete periods require at least 75% valid daily coverage for GPP and soil moisture."
+library(readr)
+library(dplyr)
+library(tidyr)
+library(lubridate)
+library(ggplot2)
+library(knitr)
+
+# ------------------------------------------------------------
+# 1. Locate the data
+# ------------------------------------------------------------
+
+# Quarto usually renders from the reports/ directory.
+# This also works when running R from the project root.
+
+data_dir <- if (dir.exists("../data/processed")) {
+  "../data"
+} else {
+  "data"
+}
+
+# ------------------------------------------------------------
+# 2. Read the datasets
+# ------------------------------------------------------------
+
+site_daily <- read_csv(
+  file.path(data_dir, "processed", "site_daily.csv"),
+  show_col_types = FALSE
+)
+
+modis <- read_csv(
+  file.path(data_dir, "external", "modis",
+            "modis_vi_my_sites.csv"),
+  show_col_types = FALSE
+)
+
+# ------------------------------------------------------------
+# 3. Prepare daily FLUXNET and ERA5-Land observations
+# ------------------------------------------------------------
+
+# Values of -9999 are missing in FLUXNET.
+# Preserve all missing values rather than replacing them
+# with estimated measurements.
+
+daily_data <- site_daily |>
+  transmute(
+    site_id,
+    date = as.Date(date),
+    gpp = as.numeric(GPP_NT_VUT_REF),
+    soil_moisture = as.numeric(era5l_swvl2)
+  ) |>
+  mutate(
+    gpp = if_else(
+      is.finite(gpp) & gpp != -9999,
+      gpp, NA_real_
+    ),
+    soil_moisture = if_else(
+      is.finite(soil_moisture) &
+        soil_moisture != -9999,
+      soil_moisture, NA_real_
+    )
+  )
+
+# ------------------------------------------------------------
+# 4. Prepare original MODIS observations
+# ------------------------------------------------------------
+
+# The course MODIS script retained pixels with reliability
+# classes 0 and 1 before calculating site means.
+# We therefore use its quality-filtered output.
+
+modis_clean <- modis |>
+  transmute(
+    site_id,
+    date = as.Date(date),
+    ndvi = as.numeric(ndvi),
+    evi = as.numeric(evi),
+    n_good_pixels = as.integer(n_good_pixels)
+  ) |>
+  mutate(
+    ndvi = if_else(
+      is.finite(ndvi), ndvi, NA_real_
+    ),
+    evi = if_else(
+      is.finite(evi), evi, NA_real_
+    )
+  ) |>
+  filter(
+    !is.na(date),
+    !is.na(n_good_pixels),
+    n_good_pixels > 0
+  ) |>
+  arrange(site_id, date)
+
+# Confirm that each site/date appears only once.
+stopifnot(
+  !anyDuplicated(
+    modis_clean[c("site_id", "date")]
+  )
+)
+
+# ------------------------------------------------------------
+# 5. Define non-overlapping MODIS temporal intervals
+# ------------------------------------------------------------
+
+modis_periods <- modis_clean |>
+  rename(composite_start = date) |>
+  arrange(site_id, composite_start) |>
+  group_by(site_id) |>
+  mutate(
+    next_start = lead(composite_start),
+
+    # End at day 16 or before the next composite starts,
+    # whichever comes first
+    composite_end = pmin(
+      composite_start + days(15),
+      coalesce(
+        next_start - days(1),
+        composite_start + days(15)
+      )
+    ),
+
+    year = year(composite_start),
+    month = month(composite_start)
+  ) |>
+  ungroup() |>
+  select(-next_start)
+
+# ------------------------------------------------------------
+# 6. Match daily data to each MODIS period
+# ------------------------------------------------------------
+
+period_calendar <- modis_periods |>
+  rowwise() |>
+  mutate(
+    dates = list(
+      seq(
+        composite_start,
+        composite_end,
+        by = "day"
+      )
+    )
+  ) |>
+  ungroup() |>
+  tidyr::unnest(dates) |>
+  rename(date = dates) |>
+  select(
+    site_id,
+    composite_start,
+    composite_end,
+    date
+  )
+
+# Verify that there are no duplicate dates per site
+stopifnot(
+  !anyDuplicated(
+    period_calendar[c("site_id", "date")]
+  )
+)
+
+# Join the daily FLUXNET and ERA5-Land measurements
+period_daily <- period_calendar |>
+  left_join(
+    daily_data,
+    by = c("site_id", "date")
+  )
+
+# ------------------------------------------------------------
+# 7. Aggregate GPP and soil moisture
+# ------------------------------------------------------------
+
+period_summary <- period_daily |>
+  group_by(site_id, composite_start) |>
+  summarise(
+    gpp_days = sum(!is.na(gpp)),
+    soil_days = sum(!is.na(soil_moisture)),
+
+    mean_gpp = if (
+      all(is.na(gpp))
+    ) NA_real_ else mean(gpp, na.rm = TRUE),
+
+    mean_soil_moisture = if (
+      all(is.na(soil_moisture))
+    ) NA_real_ else mean(
+      soil_moisture,
+      na.rm = TRUE
+    ),
+
+    .groups = "drop"
+  )
+
+# ------------------------------------------------------------
+# 8. Create the final matched dataset
+# ------------------------------------------------------------
+
+# ------------------------------------------------------------
+# 8. Create the final matched dataset
+# ------------------------------------------------------------
+
+modis_matched <- modis_periods |>
+  left_join(
+    period_summary,
+    by = c("site_id", "composite_start")
+  ) |>
+  mutate(
+    period_days = as.integer(
+      composite_end - composite_start
+    ) + 1,
+
+    gpp_coverage = gpp_days / period_days,
+    soil_coverage = soil_days / period_days,
+
+    valid_pair = !is.na(ndvi) &
+                 !is.na(evi) &
+                 !is.na(mean_gpp) &
+                 !is.na(mean_soil_moisture) &
+                 gpp_coverage >= 0.75 &
+                 soil_coverage >= 0.75
+  )
+
+# ------------------------------------------------------------
+# 9. Summarize temporal coverage
+# ------------------------------------------------------------
+
+modis_coverage <- modis_matched |>
+  group_by(site_id) |>
+  summarise(
+    modis_periods = n(),
+    periods_with_gpp = sum(
+      !is.na(mean_gpp)
+    ),
+    periods_with_soil = sum(
+      !is.na(mean_soil_moisture)
+    ),
+    matched_periods = sum(valid_pair),
+    years = n_distinct(
+      year[valid_pair]
+    ),
+    .groups = "drop"
+  )
+
+modis_coverage |>
+  rename(
+    "FLUXNET site" = site_id,
+    "MODIS periods (n)" = modis_periods,
+    "Periods with GPP (n)" = periods_with_gpp,
+    "Periods with soil moisture (n)" = periods_with_soil,
+    "Complete matched periods (n)" = matched_periods,
+    "Matched years (n)" = years
+  ) |>
+  kable()
+```
+
+
+# Methods
+
+## Data acquisition and spatial extraction
+
+FLUXNET daily carbon flux data were obtained from the five selected monitoring sites. Gross primary productivity derived from nighttime partitioning (`GPP_NT_VUT_REF`, g C m⁻² d⁻¹) was selected as the indicator of ecosystem photosynthetic carbon uptake [@pastorello2020].
+
+MODIS vegetation observations were downloaded using the course script `08_modis_ndvi_evi.py` through the ORNL DAAC subset service. A 9 × 9 pixel window at a nominal spatial resolution of 250 m, corresponding to approximately 2.25 × 2.25 km, was extracted around each FLUXNET tower. The MOD13Q1 product uses a sinusoidal projection, while tower locations are specified using geographic latitude and longitude. NDVI and EVI were calculated from red, near-infrared and blue reflectance bands [@didan2021; @ornl2018].
+
+ERA5-Land soil moisture data were downloaded using `01_era5land.R` through the Copernicus Climate Data Store point time-series service. Observations were extracted from the nearest grid cell to each tower location on the regular latitude–longitude grid at 0.1° spatial resolution. Volumetric soil water content from the second soil layer (`swvl2`, 7–28 cm, m³ m⁻³) was selected as an indicator of soil water availability [@munoz2021].
+
+During ERA5-Land processing, differences between the downloaded variable names and those expected by the script initially prevented the extraction of soil moisture variables. The script was modified to retain the available soil moisture layers. The corrected `swvl2` values were subsequently validated against the merged daily dataset.
+
+## Data processing and quality control
+
+Only MODIS pixels with reliability classes 0 (good) and 1 (marginal) were retained. Dimensionless NDVI and EVI values were spatially averaged across retained pixels for each site and composite date.
+
+Hourly ERA5-Land soil moisture observations were aggregated into daily means using UTC dates. FLUXNET daily observations follow site-local standard time. Consequently, matching by calendar date may introduce a temporal offset between the datasets.
+
+FLUXNET missing-value codes (−9999) and non-finite GPP and soil moisture values were converted to `NA`. No additional gap-filling was performed.
+
+## Data integration and temporal matching
+
+The daily merged dataset (`data/processed/site_daily.csv`), generated using the course script `09_merge.R`, provided FLUXNET GPP and ERA5-Land soil moisture observations. Original MODIS composite observations were obtained separately from `data/external/modis/modis_vi_my_sites.csv` to avoid introducing artificial daily observations through interpolation.
+
+Daily GPP and soil moisture values were averaged over non-overlapping intervals of up to 16 days, corresponding to the MODIS composite periods. The datasets were matched using the site identifier (`site_id`) and date.
+
+Intervals were retained when both NDVI and EVI were available and at least 75% of the expected daily GPP and soil moisture observations were valid. The resulting analytical dataset contained one observation per retained composite interval and monitoring site.
+
+## Statistical analysis and visualization
+
+Relationships between vegetation greenness and ecosystem productivity were assessed using scatterplots and site-specific Spearman rank correlation coefficients (ρ). Spearman correlation was selected to quantify monotonic relationships without assuming linearity or normally distributed variables. NDVI–GPP and EVI–GPP correlations were calculated separately for each site using the same matched observations.
+
+To explore the association between soil moisture and productivity, observations were classified into relatively dry and wet conditions using the lower and upper site-specific soil moisture terciles, respectively. Intermediate observations were excluded from this comparison. Site-specific thresholds were used to account for differences in typical soil moisture conditions across sites.
+
+Mean GPP was calculated for each moisture category, and absolute and percentage differences between wet and dry periods were determined. The monthly distribution of dry and wet observations was additionally examined to assess potential seasonal confounding.
+
+The analysis included five monitoring sites and 253 matched composite intervals, with 41–64 observations per site spanning two to three calendar years. Given temporal autocorrelation and the absence of replication within ecosystem types, the statistical results were interpreted descriptively rather than as causal or generalizable ecosystem-level effects.
+
+# Results
+
+## Relationship between vegetation greenness and productivity
+```{r}
+#| label: fig-greenness-gpp
+#| fig-cap: "Relationships between MODIS NDVI and EVI and mean FLUXNET gross primary productivity (GPP) across five study sites. Points represent temporally matched MODIS composite periods with at least 75% valid daily coverage for GPP and soil moisture. Solid lines represent descriptive linear regression fits calculated separately for each site and vegetation index."
+#| fig-width: 11
+#| fig-height: 5.5
+
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+
+# Keep only valid matched periods
+greenness_data <- modis_matched |>
+  filter(
+    valid_pair,
+    is.finite(ndvi),
+    is.finite(evi),
+    is.finite(mean_gpp)
+  ) |>
+  mutate(
+    ecosystem = case_when(
+      site_id == "JP-Api" ~ "DBF",
+      site_id == "CA-Ca1" ~ "ENF",
+      site_id == "CH-Rtb" ~ "GRA",
+      site_id == "CZ-KrP" ~ "CRO",
+      site_id == "US-Elm" ~ "WET"
+    ),
+    ecosystem = factor(
+      ecosystem,
+      levels = c("DBF", "ENF", "GRA", "CRO", "WET")
+    )
+  )
+
+# Ecosystem colours
+eco_cols <- c(
+  "DBF" = "#397B40",
+  "ENF" = "#289C98",
+  "GRA" = "#A1C879",
+  "CRO" = "#E8BD60",
+  "WET" = "#8AC8E8"
+)
+
+# Reshape NDVI and EVI for two-panel plotting
+greenness_long <- greenness_data |>
+  select(
+    site_id, ecosystem, ndvi, evi, mean_gpp
+  ) |>
+  pivot_longer(
+    cols = c(ndvi, evi),
+    names_to = "index",
+    values_to = "greenness"
+  ) |>
+  mutate(
+    index = factor(
+      index,
+      levels = c("ndvi", "evi"),
+      labels = c("a  NDVI", "b  EVI")
+    )
+  )
+
+# Figure
+ggplot(
+  greenness_long,
+  aes(
+    x = greenness,
+    y = mean_gpp,
+    colour = ecosystem
+  )
+) +
+  geom_point(
+    alpha = 0.65,
+    size = 2
+  ) +
+    geom_smooth(
+  method = "lm",
+  formula = y ~ x,
+  se = FALSE,
+  linewidth = 0.9
+) +
+  facet_wrap(
+    ~index,
+    scales = "free_x",
+    nrow = 1
+  ) +
+  scale_colour_manual(
+    values = eco_cols,
+    drop = FALSE
+  ) +
+  labs(
+    x = "Vegetation index (dimensionless)",
+    y = "Mean daily GPP (g C/m²/day)",
+    colour = "Ecosystem"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    legend.position = "bottom",
+    panel.grid.minor = element_blank(),
+    strip.text = element_text(face = "bold")
+  )
+```
+
+```{r}
+#| label: tbl-greenness-correlations
+#| tbl-cap: "Exploratory Spearman correlations between vegetation indices (NDVI and EVI) and mean daily GPP at five FLUXNET sites. The number of matched periods and years is reported for each site."
+
+greenness_correlations <- greenness_data |>
+  group_by(site_id, ecosystem) |>
+  summarise(
+    n_periods = n(),
+    n_years = n_distinct(
+      lubridate::year(composite_start)
+    ),
+    rho_ndvi = cor(
+      ndvi, mean_gpp,
+      method = "spearman"
+    ),
+    rho_evi = cor(
+      evi, mean_gpp,
+      method = "spearman"
+    ),
+    .groups = "drop"
+  )
+
+greenness_correlations |>
+  mutate(
+    rho_ndvi = round(rho_ndvi, 2),
+    rho_evi = round(rho_evi, 2)
+  ) |>
+  rename(
+    "Site ID" = site_id,
+    "Ecosystem" = ecosystem,
+    "Matched periods (n)" = n_periods,
+    "Years (n)" = n_years,
+    "NDVI–GPP Spearman rho" = rho_ndvi,
+    "EVI–GPP Spearman rho" = rho_evi
+  ) |>
+  knitr::kable()
+```
+The relationships between vegetation greenness and gross primary productivity (GPP) varied considerably among the five FLUXNET sites (Figure 1; Table 3). Across the 253 matched MODIS composite periods, positive Spearman correlations were observed for both vegetation indices at four of the five sites.
+
+The strongest associations were observed at the deciduous broadleaf forest JP-Api (ρ = 0.84 for NDVI and 0.93 for EVI; n = 43), followed by the cropland CZ-KrP (ρ = 0.77 and 0.72, respectively; n = 61). Positive associations were also observed at the evergreen needleleaf forest CA-Ca1 (ρ = 0.59 and 0.71; n = 44) and the grassland CH-Rtb (ρ = 0.49 and 0.64; n = 64).
+
+In contrast, the wetland US-Elm exhibited weak associations between vegetation greenness and GPP (ρ = −0.09 for NDVI and 0.12 for EVI; n = 41), consistent with the approximately flat fitted lines in Figure 1.
+
+Among the four sites exhibiting positive correlations for both indices, EVI showed a stronger association with GPP at three sites, whereas NDVI performed slightly better at CZ-KrP (Table 3).
+
+## Soil moisture and greenness–productivity relationships
+The relationships between vegetation greenness and GPP were further examined under contrasting soil moisture conditions (Figure 2). Matched observations were classified into relatively dry and wet periods using site-specific soil moisture terciles to compare productivity under different levels of water availability.
+
+```{r}
+#| label: fig-soil-greenness-gpp
+#| fig-cap: "Relationships between vegetation greenness (NDVI and EVI) and mean daily GPP under relatively dry and wet conditions at five FLUXNET sites. Soil moisture categories correspond to the lower and upper site-specific terciles of ERA5-Land volumetric soil water content. Only periods with at least 75% valid daily GPP and soil moisture coverage were included. Solid lines represent descriptive linear regression fits calculated separately for each site, vegetation index and moisture category."
+#| fig-width: 11
+#| fig-height: 12
+
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+
+# ------------------------------------------------------------
+# 1. Select valid matched periods
+# ------------------------------------------------------------
+
+soil_greenness <- modis_matched |>
+  filter(
+    valid_pair,
+    is.finite(ndvi),
+    is.finite(evi),
+    is.finite(mean_gpp),
+    is.finite(mean_soil_moisture)
+  ) |>
+  group_by(site_id) |>
+  mutate(
+    q33 = quantile(mean_soil_moisture, 1/3),
+    q67 = quantile(mean_soil_moisture, 2/3),
+
+    moisture_group = case_when(
+      mean_soil_moisture <= q33 ~ "Dry",
+      mean_soil_moisture >= q67 ~ "Wet",
+      TRUE ~ "Intermediate"
+    )
+  ) |>
+  ungroup()
+
+# ------------------------------------------------------------
+# 2. Keep contrasting moisture conditions
+# ------------------------------------------------------------
+
+soil_contrast <- soil_greenness |>
+  filter(moisture_group %in% c("Dry", "Wet")) |>
+  mutate(
+    moisture_group = factor(
+      moisture_group,
+      levels = c("Dry", "Wet")
+    ),
+    site_id = factor(
+      site_id,
+      levels = c(
+        "JP-Api", "CA-Ca1", "CH-Rtb",
+        "CZ-KrP", "US-Elm"
+      )
+    )
+  )
+
+# ------------------------------------------------------------
+# 3. Prepare NDVI and EVI panels
+# ------------------------------------------------------------
+
+soil_greenness_long <- soil_contrast |>
+  select(
+    site_id,
+    moisture_group,
+    ndvi,
+    evi,
+    mean_gpp
+  ) |>
+  pivot_longer(
+    cols = c(ndvi, evi),
+    names_to = "vegetation_index",
+    values_to = "greenness"
+  ) |>
+  mutate(
+    vegetation_index = factor(
+      vegetation_index,
+      levels = c("ndvi", "evi"),
+      labels = c("a  NDVI", "b  EVI")
+    )
+  )
+
+# ------------------------------------------------------------
+# 4. Plot relationships
+# ------------------------------------------------------------
+
+ggplot(
+  soil_greenness_long,
+  aes(
+    x = greenness,
+    y = mean_gpp,
+    colour = moisture_group
+  )
+) +
+  geom_point(
+    size = 2,
+    alpha = 0.75
+  ) +
+    geom_smooth(
+  method = "lm",
+  formula = y ~ x,
+  se = FALSE,
+  linewidth = 0.9
+) +
+  facet_grid(
+    site_id ~ vegetation_index,
+    scales = "free_x"
+  ) +
+  scale_colour_manual(
+    values = c(
+      "Dry" = "#D7A44C",
+      "Wet" = "#65A7CE"
+    )
+  ) +
+  labs(
+    x = "Vegetation index (dimensionless)",
+    y = "Mean daily GPP (g C/m²/day)",
+    colour = "Soil moisture"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    legend.position = "bottom",
+    panel.grid.minor = element_blank(),
+    strip.text = element_text(face = "bold")
+  )
+
+```
+
+The fitted relationships between vegetation indices and GPP differed between moisture categories and among study sites (Figure 2). At JP-Api and CH-Rtb, positive relationships were observed for both vegetation indices under dry and wet conditions, with partial overlap between the two moisture categories. At CA-Ca1, dry-period observations were associated with substantially higher GPP, including at overlapping NDVI and EVI values, while the wet-period observations exhibited weak negative fitted relationships.
+
+At CZ-KrP, the fitted lines for wet periods generally indicated higher GPP at comparable vegetation index values within the overlapping ranges. In contrast, US-Elm exhibited relatively low GPP and approximately flat relationships under both moisture conditions.
+
+```{r}
+#| label: tbl-soil-gpp-comparison
+#| tbl-cap: "Mean daily gross primary productivity under contrasting soil moisture conditions across five FLUXNET sites. Dry and wet periods were defined using site-specific lower and upper soil moisture terciles. Only periods with at least 75% valid daily GPP and soil moisture coverage were included. Differences are expressed as wet minus dry GPP, relative to dry-period GPP."
+
+library(knitr)
+
+# ------------------------------------------------------------
+# 1. Mean GPP within each moisture category
+# ------------------------------------------------------------
+
+soil_gpp_summary <- soil_contrast |>
+  group_by(site_id, moisture_group) |>
+  summarise(
+    n_periods = n(),
+    mean_gpp = mean(mean_gpp),
+    .groups = "drop"
+  )
+
+# ------------------------------------------------------------
+# 2. Compare dry and wet conditions
+# ------------------------------------------------------------
+
+soil_gpp_comparison <- soil_gpp_summary |>
+  pivot_wider(
+    names_from = moisture_group,
+    values_from = c(n_periods, mean_gpp)
+  ) |>
+  mutate(
+    gpp_difference = mean_gpp_Wet - mean_gpp_Dry,
+
+    relative_difference = if_else(
+      !is.na(mean_gpp_Dry) & mean_gpp_Dry != 0,
+      100 * gpp_difference / mean_gpp_Dry,
+      NA_real_
+    )
+  )
+
+# ------------------------------------------------------------
+# 3. Present results
+# ------------------------------------------------------------
+
+soil_gpp_comparison |>
+  transmute(
+    "Site ID" = site_id,
+    "Dry periods (n)" = n_periods_Dry,
+    "Wet periods (n)" = n_periods_Wet,
+    "Dry GPP (g C/m²/day)" = round(mean_gpp_Dry, 2),
+    "Wet GPP (g C/m²/day)" = round(mean_gpp_Wet, 2),
+    "Wet − dry GPP (g C/m²/day)" =
+      round(gpp_difference, 2),
+    "Relative difference (%)" =
+      round(relative_difference, 1)
+  ) |>
+  kable()
+
+```
+
+```{r}
+#| label: fig-dry-wet-gpp
+#| fig-cap: "Distribution of mean daily gross primary productivity (GPP) during relatively dry and wet periods across five FLUXNET sites. Moisture categories represent the lower and upper site-specific terciles of ERA5-Land soil moisture. Boxes represent the interquartile range, horizontal lines indicate medians, diamonds indicate means, and individual points represent matched MODIS composite periods. Sample sizes are indicated above each distribution."
+#| fig-width: 10
+#| fig-height: 5
+
+library(dplyr)
+library(ggplot2)
+
+# Calculate sample sizes for each group
+gpp_group_labels <- soil_contrast |>
+  group_by(site_id, moisture_group) |>
+  summarise(
+    n = n(),
+    label_y = max(mean_gpp) + 0.8,
+    .groups = "drop"
+  )
+
+# Compare GPP distributions
+ggplot(
+  soil_contrast,
+  aes(
+    x = moisture_group,
+    y = mean_gpp,
+    fill = moisture_group
+  )
+) +
+  geom_boxplot(
+    width = 0.55,
+    alpha = 0.65,
+    outlier.shape = NA
+  ) +
+  geom_jitter(
+    aes(colour = moisture_group),
+    position = position_jitter(
+      width = 0.12,
+      height = 0,
+      seed = 42
+    ),
+    size = 1.5,
+    alpha = 0.6
+  ) +
+  stat_summary(
+    fun = mean,
+    geom = "point",
+    shape = 23,
+    size = 3,
+    fill = "white",
+    colour = "black"
+  ) +
+  geom_text(
+    data = gpp_group_labels,
+    aes(
+      x = moisture_group,
+      y = label_y,
+      label = paste0("n = ", n)
+    ),
+    inherit.aes = FALSE,
+    size = 3
+  ) +
+  facet_wrap(
+    ~site_id,
+    nrow = 1
+  ) +
+  scale_fill_manual(
+    values = c(
+      "Dry" = "#D7A44C",
+      "Wet" = "#65A7CE"
+    )
+  ) +
+  scale_colour_manual(
+    values = c(
+      "Dry" = "#D7A44C",
+      "Wet" = "#65A7CE"
+    )
+  ) +
+  scale_y_continuous(
+    expand = expansion(mult = c(0.05, 0.12))
+  ) +
+  labs(
+    x = "Relative soil moisture condition",
+    y = "Mean daily GPP (g C/m²/day)"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    legend.position = "none",
+    panel.grid.minor = element_blank(),
+    panel.grid.major.x = element_blank(),
+    strip.text = element_text(face = "bold")
+  )
+```
+
+Mean GPP was higher during relatively dry periods at four of the five FLUXNET sites (Figure 3; Table 4). The largest relative differences were observed at the evergreen needleleaf forest CA-Ca1, where mean GPP decreased from 11.77 to 3.33 g C m⁻² day⁻¹ between dry and wet periods (−71.7%), and at the deciduous broadleaf forest JP-Api, where the corresponding values were 7.76 and 3.05 g C m⁻² day⁻¹ (−60.7%).
+
+A similar but less pronounced pattern was observed at the grassland CH-Rtb and the wetland US-Elm, where mean GPP was 36.2% and 36.1% lower during relatively wet periods, respectively. In contrast, the cropland CZ-KrP exhibited slightly higher mean GPP during wet periods, increasing from 3.35 to 3.59 g C m⁻² day⁻¹ (+7.2%).
+
+The distributions in Figure 3 further illustrate differences in productivity and variability among sites. CA-Ca1 exhibited a pronounced separation between dry and wet GPP distributions, whereas greater overlap was observed at CH-Rtb and CZ-KrP. At CZ-KrP, several high-GPP observations occurred during wet periods, despite a lower wet-period median, illustrating the influence of high values on the mean. US-Elm consistently exhibited the lowest productivity and limited absolute variability under both moisture conditions.
+
+Overall, the observed GPP differences between moisture categories were site-dependent and predominantly opposite to the expected moisture–productivity pattern.
+
+# Discussion
+
+The first hypothesis was largely supported, with positive associations between vegetation greenness and GPP at four of the five FLUXNET sites (Figure 1; Table 3), consistent with previous research demonstrating the potential of satellite vegetation indices to capture ecosystem productivity [@huang2019]. The strongest relationship was observed between EVI and GPP at the deciduous broadleaf forest JP-Api (ρ = 0.93), whereas both vegetation indices exhibited weak associations at the wetland US-Elm. Differences in the performance of NDVI and EVI may reflect their contrasting sensitivity to vegetation density and canopy structure [@huete2002].
+
+Contrary to the second hypothesis, mean GPP was higher during relatively dry periods at four sites, with CZ-KrP being the only site exhibiting higher mean productivity under relatively wet conditions (Figure 3; Table 4). Although the fitted greenness–productivity relationships differed between moisture categories (Figure 2), seasonal variation in radiation, temperature and vegetation phenology may confound these associations. Furthermore, relatively low soil moisture does not necessarily indicate physiological water stress, as ecosystem photosynthetic responses depend on prevailing moisture conditions and vegetation characteristics [@peng2024].
+
+Spatial scale differences also introduce uncertainty: although individual MODIS pixels (250 m) are comparable to the approximate FLUXNET footprint (100 m–1 km), the extracted 9 × 9 pixel window (approximately 2.25 × 2.25 km) may include vegetation outside the tower footprint. ERA5-Land soil moisture represents a substantially larger area (approximately 9 km native resolution), potentially obscuring local soil water variability within the flux footprint [@munoz2021].
+
+The principal limitations were the absence of replication within ecosystem types and the temporal dependence and seasonal confounding of repeated observations, limiting causal interpretation and ecosystem-level generalization. Future analyses should incorporate additional monitoring sites and account for seasonality, radiation, temperature and atmospheric water demand to better isolate the influence of soil moisture on greenness–productivity relationships.
+
+# Data and citations
+
+## FLUXNET ecosystem flux observations
+
+Daily ecosystem carbon flux observations were obtained from FLUXNET data products for five monitoring sites: CA-Ca1, CH-Rtb, CZ-KrP, JP-Api and US-Elm. Gross primary productivity was represented by the variable `GPP_NT_VUT_REF`, expressed in g C m^-2^ day^-1^. The FLUXNET data products and processing framework are described by @pastorello2020.
+
+The original FLUXNET data were retained locally, while the processed observations were read from `data/processed/site_daily.csv`. Missing observations were preserved as missing values, and no additional gap-filling was performed in this analysis.
+
+The five site-specific FLUXNET datasets were attributed to their respective data providers: CA-Ca1 [@black2025], CH-Rtb [@hirschi2026], CZ-KrP [@acosta2026], JP-Api [@yasuda2026], and US-Elm [@starr2026]. These dataset-specific references complement the general description of FLUXNET data processing provided by @pastorello2020.
+
+## MODIS vegetation indices
+
+Vegetation greenness was derived from the MODIS/Terra MOD13Q1 Collection 6.1 vegetation-index product, distributed by NASA's Land Processes Distributed Active Archive Center [@didan2021].
+
+Red, near-infrared and blue reflectance observations were obtained through the ORNL DAAC MODIS/VIIRS Subsets Web Service [@ornl2018]. NDVI and EVI were calculated from surface reflectance observations using `scripts/block5/08_modis_ndvi_evi.py`. The extraction covered approximately 9 × 9 MODIS pixels centered on each tower, corresponding to an approximately 2 × 2 km spatial window.
+
+Only observations with pixel reliability classes 0 (good) and 1 (marginal) were retained. Vegetation-index values were subsequently averaged across retained pixels for each MODIS composite date. No missing satellite observations were filled manually.
+
+## ERA5-Land soil moisture
+
+Soil moisture estimates were obtained from ERA5-Land, a global land-surface reanalysis dataset produced by the European Centre for Medium-Range Weather Forecasts and distributed through the Copernicus Climate Data Store [@munoz2021].
+
+The analysis used volumetric soil water content from the second soil layer (`swvl2`, 7–28 cm), expressed in m^3^ m^-3^. Hourly estimates were aggregated to daily values using UTC dates and subsequently matched to the temporal intervals corresponding to MODIS composites.
+
+Contains modified Copernicus Climate Change Service information (2026).
+
+## Data availability and reproducibility
+
+All data processing and analysis were conducted using R and the scripts provided for Block 5 of the Environmental Monitoring and Data Analysis course, with modifications described in the Methods section.
+
+The report source code is available in the [GitHub repository](https://github.com/valeriapagonas/datascience_env_monit). Raw and externally downloaded datasets are stored locally in `data/raw` and `data/external`, respectively, and are excluded from Git. Processed datasets are generated using the Block 5 data-processing workflow.
+
+## FLUXNET acknowledgement
+
+FLUXNET data products were produced and harmonized by eddy covariance regional networks and data processing centers, including AmeriFlux, ChinaFlux, European Fluxes Database, ICOS, JapanFlux, KoFlux, OzFlux, SAEON, and TERN. These products also include a modified version of ERA5 hourly data provided by the Copernicus Climate Change Service.
